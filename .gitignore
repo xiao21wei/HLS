@@ -1,0 +1,55 @@
+# Build products
+/build/
+/cmake-build-*/
+/CMakeFiles/
+/CMakeCache.txt
+/Makefile
+/cmake_install.cmake
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Experiment logs and generated result files
+/run_logs*/
+/results/
+/test_save/
+/copt_progress_checks/
+/copt_initial_solution_checks/
+/*.csv
+*.log
+
+# External benchmark mirrors not required by the default Mk01-Mk10 workflow
+/datasets/Kacem_Data/
+/datasets/SmartLab_Challenge_2020/
+/datasets/fjsp-instances-main/
+
+# Python caches and test caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE and OS metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Local environment, credentials, and temporary files
+.env
+.env.*
+*.lic
+*.license
+*.tmp
+*.temp
