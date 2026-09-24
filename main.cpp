@@ -3,6 +3,7 @@
 #include "DataProc.h"
 #include "AdaptiveSearch.h"
 #include "GreedySearch.h"
+#include "GuidedSearch.h"
 #include "RandomSearch.h"
 #include "TabuSearch.h"
 #include "Schedule.h"
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <ctime>
 #include <iomanip>
 #include <random>
@@ -26,6 +28,16 @@ namespace {
 
 constexpr int kMaximumOuterCalls = 1200;
 constexpr int kMaximumEliteArchiveSize = 8;
+
+bool GuidedSearchRequested() {
+    const char *value = std::getenv("HLS_ENABLE_GUIDED_SEARCH");
+    return value == nullptr || std::string(value) != "0";
+}
+
+bool GuidedSearchForced() {
+    const char *value = std::getenv("HLS_ENABLE_GUIDED_SEARCH");
+    return value != nullptr && std::string(value) == "force";
+}
 
 int GetMethodIterationBudget(
     const SearchDecision &decision,
@@ -51,6 +63,11 @@ int GetMethodIterationBudget(
             : configured_iterations;
         return remaining_fraction <= 0.10 ? std::min(budget, 10) : budget;
     }
+    if (decision.method == SearchMethod::Guided) {
+        return remaining_fraction <= 0.10
+            ? std::min(configured_iterations, 10)
+            : configured_iterations;
+    }
     return configured_iterations;
 }
 
@@ -64,6 +81,8 @@ double GetMethodTimeBudgetSeconds(
         budget = decision.intensification ? 3.0 : 10.0;
     } else if (decision.method == SearchMethod::Tabu) {
         budget = decision.intensification ? 10.0 : 20.0;
+    } else if (decision.method == SearchMethod::Guided) {
+        budget = 20.0;
     } else {
         budget = 30.0;
     }
@@ -97,6 +116,7 @@ Schedule RunSearchMethod(
     const int iteration_budget,
     const int population_size,
     const int tabu_list_length,
+    const std::vector<Schedule> &elite_archive,
     const SearchDeadline deadline
 ) {
     switch (decision.method) {
@@ -127,6 +147,16 @@ Schedule RunSearchMethod(
                 tabu_list_length,
                 iteration_budget,
                 machines,
+                deadline
+            );
+        case SearchMethod::Guided:
+            return GuidedInsertionSearch(
+                start_schedule,
+                elite_archive,
+                jobs,
+                job_list,
+                machines,
+                iteration_budget,
                 deadline
             );
     }
@@ -228,6 +258,12 @@ int main(int argc, char *argv[]) {
     unsigned int random_seed = argc > 10
         ? static_cast<unsigned int>(std::stoul(argv[10]))
         : static_cast<unsigned int>(time(nullptr)); // 随机种子
+    int operation_count = 0;
+    for (const auto &job : jobs) {
+        operation_count += job.get_process_count();
+    }
+    const bool guided_search_enabled = GuidedSearchRequested() &&
+        (GuidedSearchForced() || operation_count >= 80);
 
     if (total_time_limit_seconds <= 0) {
         std::cerr << "total_time_limit_seconds must be positive." << std::endl;
@@ -246,6 +282,9 @@ int main(int argc, char *argv[]) {
     cout << "copt_time_limit_seconds: " << copt_time_limit_seconds << endl;
     cout << "total_time_limit_seconds: " << total_time_limit_seconds << endl;
     cout << "random_seed: " << random_seed << endl;
+    cout << "guided_search_enabled: "
+         << (guided_search_enabled ? "true" : "false") << endl;
+    cout << "operation_count: " << operation_count << endl;
 
     // if(argc > 2) {
     //     Schedule schedule0;
@@ -361,15 +400,20 @@ int main(int argc, char *argv[]) {
     AdaptiveSearchController search_controller(
         search_mode_param,
         random_search_strategy_param,
-        random_seed ^ 0xA511E9B3U
+        random_seed ^ 0xA511E9B3U,
+        guided_search_enabled
     );
     SetRandomSearchSeed(random_seed ^ 0x9E3779B9U);
     SetTabuSearchSeed(random_seed ^ 0x85EBCA6BU);
+    SetGuidedSearchSeed(random_seed ^ 0xC2B2AE35U);
     std::vector<Schedule> elite_archive{schedule0};
     int count = 0;
     int stagnation_call_count = 0;
     int no_improvement_round_count = 0;
-    std::array<bool, 3> method_failed_since_improvement{};
+    std::array<bool, 4> method_failed_since_improvement{};
+    method_failed_since_improvement[
+        static_cast<int>(SearchMethod::Guided)
+    ] = !guided_search_enabled;
 
     while (count <= kMaximumOuterCalls &&
            no_improvement_round_count <= max_repeat_count &&
@@ -427,6 +471,7 @@ int main(int argc, char *argv[]) {
             iteration_budget,
             population_size,
             tabu_list_length,
+            elite_archive,
             call_deadline
         );
         const double elapsed_seconds = std::chrono::duration<double>(
@@ -441,6 +486,9 @@ int main(int argc, char *argv[]) {
             stagnation_call_count = 0;
             no_improvement_round_count = 0;
             method_failed_since_improvement.fill(false);
+            method_failed_since_improvement[
+                static_cast<int>(SearchMethod::Guided)
+            ] = !guided_search_enabled;
             if (!decision.intensification) {
                 search_controller.ScheduleIntensification();
             }
@@ -462,6 +510,9 @@ int main(int argc, char *argv[]) {
                 )) {
                 ++no_improvement_round_count;
                 method_failed_since_improvement.fill(false);
+                method_failed_since_improvement[
+                    static_cast<int>(SearchMethod::Guided)
+                ] = !guided_search_enabled;
             }
         }
         search_controller.Record(
@@ -484,11 +535,15 @@ int main(int argc, char *argv[]) {
         ++count;
     }
 
-    for (const SearchMethod method : {
-             SearchMethod::Greedy,
-             SearchMethod::Genetic,
-             SearchMethod::Tabu
-         }) {
+    std::vector<SearchMethod> summary_methods{
+        SearchMethod::Greedy,
+        SearchMethod::Genetic,
+        SearchMethod::Tabu
+    };
+    if (guided_search_enabled) {
+        summary_methods.push_back(SearchMethod::Guided);
+    }
+    for (const SearchMethod method : summary_methods) {
         const SearchMethodStats &stats = search_controller.GetStats(method);
         cout << SearchMethodName(method)
              << " summary: calls=" << stats.calls

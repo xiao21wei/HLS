@@ -7,7 +7,7 @@
 
 namespace {
 
-constexpr int kMethodCount = 3;
+constexpr int kMethodCount = 4;
 constexpr int kMinimumInitialCalls = 2;
 constexpr int kMildStagnation = 5;
 constexpr int kDeepStagnation = 12;
@@ -21,8 +21,10 @@ double ClampProbability(const double value) {
 AdaptiveSearchController::AdaptiveSearchController(
     const double search_mode_preference,
     const double genetic_preference,
-    const unsigned int random_seed
-) : random_engine_(random_seed) {
+    const unsigned int random_seed,
+    const bool guided_search_enabled
+) : random_engine_(random_seed),
+    guided_search_enabled_(guided_search_enabled) {
     const double search_preference = ClampProbability(search_mode_preference);
     const double genetic_share = ClampProbability(genetic_preference);
     initial_preferences_[MethodIndex(SearchMethod::Greedy)] =
@@ -31,14 +33,15 @@ AdaptiveSearchController::AdaptiveSearchController(
         std::max(0.05, search_preference * genetic_share);
     initial_preferences_[MethodIndex(SearchMethod::Tabu)] =
         std::max(0.05, search_preference * (1.0 - genetic_share));
-
     const double preference_sum =
         initial_preferences_[0] +
         initial_preferences_[1] +
         initial_preferences_[2];
-    for (double &preference : initial_preferences_) {
-        preference /= preference_sum;
+    for (int index = 0; index < 3; ++index) {
+        initial_preferences_[index] /= preference_sum;
     }
+    initial_preferences_[MethodIndex(SearchMethod::Guided)] =
+        guided_search_enabled_ ? 0.10 : 0.0;
 
     pending_intensification_.push_back({SearchMethod::Greedy, true, false});
     pending_intensification_.push_back({SearchMethod::Tabu, true, false});
@@ -54,14 +57,30 @@ SearchDecision AdaptiveSearchController::Select(
         return decision;
     }
 
-    std::array<bool, kMethodCount> eligible_methods{true, true, true};
+    std::array<bool, kMethodCount> eligible_methods{true, true, true, true};
+    eligible_methods[MethodIndex(SearchMethod::Guided)] =
+        guided_search_enabled_ && stagnation_count >= kMildStagnation;
+    const SearchMethodStats &guided_stats =
+        statistics_[MethodIndex(SearchMethod::Guided)];
+    if (eligible_methods[MethodIndex(SearchMethod::Guided)] &&
+        guided_stats.calls >= 4 && guided_stats.global_improvements == 0) {
+        eligible_methods[MethodIndex(SearchMethod::Guided)] =
+            stagnation_count >= kDeepStagnation && total_calls_ % 32 == 0;
+    }
     bool has_method_without_long_failure = false;
-    for (const auto &stats : statistics_) {
+    for (int index = 0; index < kMethodCount; ++index) {
+        if (!eligible_methods[index]) {
+            continue;
+        }
+        const auto &stats = statistics_[index];
         has_method_without_long_failure =
             has_method_without_long_failure || stats.consecutive_failures < 6;
     }
     if (has_method_without_long_failure) {
         for (int index = 0; index < kMethodCount; ++index) {
+            if (!eligible_methods[index]) {
+                continue;
+            }
             const SearchMethodStats &stats = statistics_[index];
             const bool periodic_probe =
                 (total_calls_ + index * 4) % 12 == 0;
@@ -251,6 +270,10 @@ double AdaptiveSearchController::Score(
     if (method == SearchMethod::Genetic && stagnation_count >= kDeepStagnation) {
         score += 0.12;
     }
+    if (method == SearchMethod::Guided &&
+        stagnation_count >= kMildStagnation) {
+        score += std::min(0.15, 0.03 + stagnation_count * 0.006);
+    }
     if (remaining_fraction <= 0.10 && method == SearchMethod::Greedy) {
         score += 0.08;
     }
@@ -258,7 +281,7 @@ double AdaptiveSearchController::Score(
 }
 
 SearchMethod AdaptiveSearchController::SelectExplorationMethod(
-    const std::array<bool, 3> &eligible_methods
+    const std::array<bool, 4> &eligible_methods
 ) {
     std::vector<SearchMethod> methods;
     std::vector<double> weights;
@@ -280,6 +303,8 @@ const char *SearchMethodName(const SearchMethod method) {
             return "Genetic Algorithm";
         case SearchMethod::Tabu:
             return "Tabu Search";
+        case SearchMethod::Guided:
+            return "Guided Insertion";
     }
     return "Unknown Search";
 }

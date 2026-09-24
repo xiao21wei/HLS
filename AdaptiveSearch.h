@@ -8,7 +8,8 @@
 enum class SearchMethod {
     Greedy = 0,
     Genetic = 1,
-    Tabu = 2
+    Tabu = 2,
+    Guided = 3
 };
 
 struct SearchDecision {
@@ -34,7 +35,8 @@ public:
     AdaptiveSearchController(
         double search_mode_preference,
         double genetic_preference,
-        unsigned int random_seed
+        unsigned int random_seed,
+        bool guided_search_enabled = true
     );
 
     SearchDecision Select(int stagnation_count, double remaining_fraction);
@@ -58,14 +60,15 @@ private:
         double remaining_fraction
     ) const;
     SearchMethod SelectExplorationMethod(
-        const std::array<bool, 3> &eligible_methods
+        const std::array<bool, 4> &eligible_methods
     );
 
-    std::array<double, 3> initial_preferences_{};
-    std::array<SearchMethodStats, 3> statistics_{};
+    std::array<double, 4> initial_preferences_{};
+    std::array<SearchMethodStats, 4> statistics_{};
     std::deque<SearchDecision> pending_intensification_;
     std::mt19937 random_engine_;
     int total_calls_ = 0;
+    bool guided_search_enabled_ = true;
 };
 
 const char *SearchMethodName(SearchMethod method);
