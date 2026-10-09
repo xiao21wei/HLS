@@ -3,9 +3,11 @@
 #include "DataProc.h"
 #include "AdaptiveSearch.h"
 #include "GreedySearch.h"
+#include "GreedyRlPolicy.h"
 #include "GuidedSearch.h"
 #include "RandomSearch.h"
 #include "TabuSearch.h"
+#include "TabuRlPolicy.h"
 #include "Schedule.h"
 #include "Job.h"
 #include "Machine.h"
@@ -37,6 +39,18 @@ bool GuidedSearchRequested() {
 bool GuidedSearchForced() {
     const char *value = std::getenv("HLS_ENABLE_GUIDED_SEARCH");
     return value != nullptr && std::string(value) == "force";
+}
+
+int TargetMakespanFromEnvironment() {
+    const char *value = std::getenv("HLS_TARGET_MAKESPAN");
+    if (value == nullptr) {
+        return 0;
+    }
+    try {
+        return std::max(0, std::stoi(value));
+    } catch (const std::exception &) {
+        return 0;
+    }
 }
 
 int GetMethodIterationBudget(
@@ -264,6 +278,12 @@ int main(int argc, char *argv[]) {
     }
     const bool guided_search_enabled = GuidedSearchRequested() &&
         (GuidedSearchForced() || operation_count >= 80);
+    const int target_makespan = TargetMakespanFromEnvironment();
+    ConfigureGreedyRlPolicyFromEnvironment(random_seed ^ 0x27D4EB2DU);
+    const GreedyRlRuntimeConfig &greedy_rl_config =
+        GetGreedyRlRuntimeConfig();
+    ConfigureTabuRlPolicyFromEnvironment(random_seed ^ 0x165667B1U);
+    const TabuRlRuntimeConfig &tabu_rl_config = GetTabuRlRuntimeConfig();
 
     if (total_time_limit_seconds <= 0) {
         std::cerr << "total_time_limit_seconds must be positive." << std::endl;
@@ -285,6 +305,53 @@ int main(int argc, char *argv[]) {
     cout << "guided_search_enabled: "
          << (guided_search_enabled ? "true" : "false") << endl;
     cout << "operation_count: " << operation_count << endl;
+    cout << "target_makespan: " << target_makespan << endl;
+    cout << "greedy_rl_requested: "
+         << (greedy_rl_config.requested ? "true" : "false") << endl;
+    cout << "greedy_rl_enabled: "
+         << (greedy_rl_config.enabled ? "true" : "false") << endl;
+    cout << "greedy_rl_model: " << greedy_rl_config.model_path << endl;
+    cout << "greedy_rl_top_k: " << greedy_rl_config.candidate_limit << endl;
+    cout << "greedy_rl_dynamic_top_k: "
+         << (greedy_rl_config.dynamic_candidate_limit ? "true" : "false")
+         << endl;
+    cout << "greedy_rl_fallback_on_miss: "
+         << (greedy_rl_config.fallback_on_miss ? "true" : "false")
+         << endl;
+    cout << "greedy_rl_verify_with_baseline: "
+         << (greedy_rl_config.verify_with_baseline ? "true" : "false")
+         << endl;
+    cout << "greedy_rl_temperature: " << greedy_rl_config.temperature << endl;
+    cout << "greedy_rl_exploration: "
+         << greedy_rl_config.exploration_fraction << endl;
+    cout << "greedy_rl_rule_fraction: " << greedy_rl_config.rule_fraction
+         << endl;
+    cout << "greedy_rl_status: " << greedy_rl_config.status << endl;
+    cout << "tabu_rl_requested: "
+         << (tabu_rl_config.requested ? "true" : "false") << endl;
+    cout << "tabu_rl_enabled: "
+         << (tabu_rl_config.enabled ? "true" : "false") << endl;
+    cout << "tabu_rl_model: " << tabu_rl_config.model_path << endl;
+    cout << "tabu_rl_top_k: " << tabu_rl_config.candidate_limit << endl;
+    cout << "tabu_rl_dynamic_top_k: "
+         << (tabu_rl_config.dynamic_candidate_limit ? "true" : "false")
+         << endl;
+    cout << "tabu_rl_fallback_on_miss: "
+         << (tabu_rl_config.fallback_on_miss ? "true" : "false")
+         << endl;
+    cout << "tabu_rl_fallback_on_non_improvement: "
+         << (tabu_rl_config.fallback_on_non_improvement ? "true" : "false")
+         << endl;
+    cout << "tabu_rl_verify_full_neighborhood: "
+         << (tabu_rl_config.verify_full_neighborhood ? "true" : "false")
+         << endl;
+    cout << "tabu_rl_min_per_neighborhood: "
+         << tabu_rl_config.minimum_per_neighborhood << endl;
+    cout << "tabu_rl_temperature: " << tabu_rl_config.temperature << endl;
+    cout << "tabu_rl_exploration: "
+         << tabu_rl_config.exploration_fraction << endl;
+    cout << "tabu_rl_rule_fraction: " << tabu_rl_config.rule_fraction << endl;
+    cout << "tabu_rl_status: " << tabu_rl_config.status << endl;
 
     // if(argc > 2) {
     //     Schedule schedule0;
@@ -403,6 +470,15 @@ int main(int argc, char *argv[]) {
         random_seed ^ 0xA511E9B3U,
         guided_search_enabled
     );
+    for (const SearchMethod method : {
+             SearchMethod::Greedy,
+             SearchMethod::Genetic,
+             SearchMethod::Tabu,
+             SearchMethod::Guided
+         }) {
+        cout << "method_score_bonus[" << SearchMethodName(method) << "]: "
+             << search_controller.GetScoreBonus(method) << endl;
+    }
     SetRandomSearchSeed(random_seed ^ 0x9E3779B9U);
     SetTabuSearchSeed(random_seed ^ 0x85EBCA6BU);
     SetGuidedSearchSeed(random_seed ^ 0xC2B2AE35U);
@@ -417,6 +493,8 @@ int main(int argc, char *argv[]) {
 
     while (count <= kMaximumOuterCalls &&
            no_improvement_round_count <= max_repeat_count &&
+           (target_makespan <= 0 ||
+            output_schedule.get_TotalTime() > target_makespan) &&
            !SearchDeadlineReached(optimization_deadline)) {
         const double remaining_seconds = std::max(
             0.0,
@@ -553,6 +631,40 @@ int main(int argc, char *argv[]) {
              << stats.total_relative_gain
              << ", time=" << setprecision(3) << stats.total_seconds
              << defaultfloat << "s" << endl;
+    }
+    if (greedy_rl_config.requested) {
+        const GreedyRlStats &rl_stats = GetGreedyRlStats();
+        cout << "Greedy RL summary: enabled="
+             << (greedy_rl_config.enabled ? "true" : "false")
+             << ", selection_calls=" << rl_stats.selection_calls
+             << ", generated_candidates=" << rl_stats.generated_candidates
+             << ", selected_candidates=" << rl_stats.selected_candidates
+             << ", model_candidates=" << rl_stats.model_candidates
+             << ", rule_candidates=" << rl_stats.rule_candidates
+             << ", exploration_candidates="
+             << rl_stats.exploration_candidates
+             << ", fallback_calls=" << rl_stats.fallback_calls
+             << ", verification_calls=" << rl_stats.verification_calls
+             << endl;
+    }
+    if (tabu_rl_config.requested) {
+        const TabuRlStats &rl_stats = GetTabuRlStats();
+        cout << "Tabu RL summary: enabled="
+             << (tabu_rl_config.enabled ? "true" : "false")
+             << ", selection_calls=" << rl_stats.selection_calls
+             << ", generated_candidates=" << rl_stats.generated_candidates
+             << ", selected_candidates=" << rl_stats.selected_candidates
+             << ", model_candidates=" << rl_stats.model_candidates
+             << ", rule_candidates=" << rl_stats.rule_candidates
+             << ", exploration_candidates="
+             << rl_stats.exploration_candidates
+             << ", neighborhood_safeguards="
+             << rl_stats.neighborhood_safeguards
+             << ", fallback_calls=" << rl_stats.fallback_calls
+             << ", non_improvement_fallback_calls="
+             << rl_stats.non_improvement_fallback_calls
+             << ", verification_calls=" << rl_stats.verification_calls
+             << endl;
     }
 
     // output_schedule.to_string();

@@ -1,0 +1,1240 @@
+file_path: /home/luopw24/HLS/datasets/Brandimarte_Data/Text/Mk01.fjs
+search_mode_param: 0.5
+random_search_strategy_param: 0.5
+max_repeat_count: 100
+max_iter_count: 30
+population_size: 20
+tabu_list_length: 25
+copt_time_limit_seconds: 300
+total_time_limit_seconds: 3600
+random_seed: 100001
+guided_search_enabled: false
+operation_count: 55
+greedy_rl_requested: true
+greedy_rl_enabled: true
+greedy_rl_model: /home/luopw24/HLS/rl_greedy/models/greedy_policy_brandimarte.txt
+greedy_rl_top_k: 96
+greedy_rl_dynamic_top_k: true
+greedy_rl_fallback_on_miss: true
+greedy_rl_temperature: 1
+greedy_rl_exploration: 0.15
+greedy_rl_rule_fraction: 0.25
+greedy_rl_status: model loaded
+tabu_rl_requested: true
+tabu_rl_enabled: true
+tabu_rl_model: /home/luopw24/HLS/rl_greedy/models/greedy_policy_brandimarte.txt
+tabu_rl_top_k: 256
+tabu_rl_dynamic_top_k: true
+tabu_rl_fallback_on_miss: true
+tabu_rl_min_per_neighborhood: 16
+tabu_rl_temperature: 1
+tabu_rl_exploration: 0.2
+tabu_rl_rule_fraction: 0.3
+tabu_rl_status: Greedy model loaded for Tabu candidates
+Cardinal Optimizer v8.0.6. Build date Aug  7 2026
+Copyright Cardinal Operations 2026. All Rights Reserved
+
+COPT initial makespan: 40
+Total time: 40
+Greedy Search time: 0.109s, mode: intensification, iterations: 3
+Total time: 40
+Tabu Search time: 0.527s, mode: intensification, iterations: 15
+Total time: 40
+Genetic Algorithm time: 0.323s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.107s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: adaptive, iterations: 30
+Total time: 40
+Tabu Search time: 0.876s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.104s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.795s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: adaptive, iterations: 30
+Total time: 40
+Tabu Search time: 0.954s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.051s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.950s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.285s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.064s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.811s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.282s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.067s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.100s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.278s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.866s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.335s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.148s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.845s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.284s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.950s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.335s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.994s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.275s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.284s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.080s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 1.008s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.273s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.988s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.282s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.101s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.046s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.285s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.937s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.276s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.041s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.112s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.048s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.297s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.947s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.289s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.120s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.359s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.832s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.278s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.898s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.044s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.048s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.334s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.949s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.280s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.834s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.324s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.925s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.329s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.281s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.923s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.048s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.292s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.882s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.843s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.327s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.813s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.281s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.284s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.914s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.293s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.098s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.044s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.906s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.049s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.045s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.260s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.839s, mode: adaptive, iterations: 30
+Total time: 40
+Tabu Search time: 0.906s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.050s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.284s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.955s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.289s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.322s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.952s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.309s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.873s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.284s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.050s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.293s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.907s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.282s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.292s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.938s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.312s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.274s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.285s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.965s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.327s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.049s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 1.013s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.327s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.954s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.050s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.332s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.904s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.346s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.307s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.967s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.289s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.810s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.046s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.286s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.041s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.048s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.966s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.281s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.313s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.963s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.285s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.042s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.950s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.049s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.282s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.860s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.337s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.858s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.280s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.053s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.839s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.048s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.283s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.971s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.185s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.308s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.865s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.192s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.894s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.283s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.044s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.295s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.973s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.275s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.047s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.045s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.098s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.287s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.049s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.990s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.043s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.045s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.882s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.281s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.274s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.864s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.283s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.983s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.284s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.906s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.048s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.294s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.325s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.048s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.880s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.316s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.927s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.312s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.280s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.296s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.921s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.343s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.797s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.297s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.051s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.933s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.046s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.331s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.946s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.285s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.286s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.046s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.916s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.337s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.048s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.905s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.297s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.298s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.918s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.276s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.903s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.336s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.993s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.285s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.284s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.063s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.970s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.285s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.306s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.014s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.294s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.287s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.964s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.297s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.338s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.030s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.287s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.113s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.049s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.281s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.909s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.302s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.959s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.294s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.950s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.317s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.283s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.074s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.044s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.284s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.938s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.280s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.304s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.120s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.867s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.330s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.283s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.999s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.295s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.342s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.006s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.281s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.280s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.947s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.050s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.045s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.932s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.051s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.118s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.338s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.918s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.113s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.347s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.003s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.015s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.323s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.021s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.298s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.289s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.014s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.315s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.045s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.050s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.300s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.993s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.049s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.082s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.287s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.069s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.919s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.296s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.989s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.302s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.942s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.287s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.056s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.049s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.350s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.989s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.049s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.287s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.979s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.345s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.349s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.890s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.343s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.293s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.914s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.087s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.964s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.045s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.283s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.952s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.049s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.284s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.028s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.281s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.285s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.923s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.299s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.293s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.958s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.283s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.123s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.993s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.051s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.323s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.986s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.115s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.301s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.929s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.295s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.310s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.907s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.281s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.280s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.116s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.292s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.977s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.337s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.344s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.088s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.338s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.289s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.981s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.280s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.091s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.346s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.992s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.295s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.066s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.067s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.297s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.048s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.915s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.281s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.321s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.015s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.280s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.297s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.877s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.287s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.303s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.945s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.046s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.350s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.095s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.341s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.967s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.342s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.297s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.303s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.945s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.115s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.047s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.927s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.052s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.009s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.008s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.294s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.016s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.294s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.860s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.299s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.929s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.050s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.329s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.909s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.282s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.294s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.120s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.992s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.284s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.292s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.860s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.292s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.292s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.287s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.964s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.208s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.063s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.972s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.294s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.294s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.945s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.307s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.847s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.313s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.050s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.307s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.924s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.103s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.895s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.286s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.060s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.293s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.919s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.289s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.297s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.064s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.919s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.069s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.293s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.982s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.287s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.051s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.348s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.921s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.352s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.872s, mode: adaptive, iterations: 30
+Total time: 40
+Tabu Search time: 1.028s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.343s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.293s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.018s, mode: adaptive, iterations: 30
+Total time: 40
+Tabu Search time: 0.939s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.307s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.047s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.298s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.891s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.287s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.289s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.051s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.976s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.347s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.295s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.019s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.163s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.064s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.298s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.907s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.247s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.288s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.102s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.063s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.924s, mode: adaptive, iterations: 30
+Total time: 40
+Tabu Search time: 1.042s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.968s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.334s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.045s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.920s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.061s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.993s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.067s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.047s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.930s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.004s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.296s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.060s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.303s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.964s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.322s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.067s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.352s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.933s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.091s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 1.076s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.354s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.348s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.018s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.306s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.350s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.066s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 1.015s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.295s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.338s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.976s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.306s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.299s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.897s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.300s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.302s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.049s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.991s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.293s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.301s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.977s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.284s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.306s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.289s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.914s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.298s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.325s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.085s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 1.024s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.300s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.873s, mode: adaptive, iterations: 30
+Total time: 40
+Tabu Search time: 0.984s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.323s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.293s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.051s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.949s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.300s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.352s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.939s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.295s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.349s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.088s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.304s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.335s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.106s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.282s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.087s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.916s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.329s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.299s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.828s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.047s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.935s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.327s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.291s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.988s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.347s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.308s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.913s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.355s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.354s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.929s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.049s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.051s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.048s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.340s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.848s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.349s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.290s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 1.002s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.300s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.047s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.299s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.906s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.289s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.297s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.083s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 1.038s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.297s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.293s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.048s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 1.056s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.349s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.046s, mode: adaptive, iterations: 6
+Total time: 40
+Genetic Algorithm time: 0.299s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.891s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.048s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.896s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.298s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.070s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search time: 0.046s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 1.072s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.326s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.287s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.958s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.355s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.303s, mode: diversified, iterations: 30
+Total time: 40
+Greedy Search time: 0.100s, mode: adaptive, iterations: 6
+Total time: 40
+Tabu Search time: 0.969s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.305s, mode: diversified, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.297s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.988s, mode: adaptive, iterations: 30
+Total time: 40
+Genetic Algorithm time: 0.298s, mode: diversified, iterations: 30
+Total time: 40
+Tabu Search time: 0.994s, mode: adaptive, iterations: 30
+Total time: 40
+Greedy Search time: 0.051s, mode: adaptive, iterations: 6
+Total time: 40
+Greedy Search summary: calls=114, local_improvements=0, global_improvements=0, relative_gain=0.000000, time=7.497s
+Genetic Algorithm summary: calls=298, local_improvements=0, global_improvements=0, relative_gain=0.000000, time=89.546s
+Tabu Search summary: calls=185, local_improvements=0, global_improvements=0, relative_gain=0.000000, time=174.938s
+Greedy RL summary: enabled=true, selection_calls=3261, generated_candidates=865115, selected_candidates=268483, model_candidates=191001, rule_candidates=48936, exploration_candidates=28546, fallback_calls=132
+Tabu RL summary: enabled=true, selection_calls=7323, generated_candidates=4099954, selected_candidates=1719917, model_candidates=992109, rule_candidates=437822, exploration_candidates=289986, neighborhood_safeguards=3963, fallback_calls=0
+Final makespan: 40
+40
+572

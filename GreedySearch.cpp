@@ -5,7 +5,9 @@
 #include "GreedySearch.h"
 
 #include <algorithm>
+#include <array>
 #include <climits>
+#include <cmath>
 #include <optional>
 #include <queue>
 #include <stdexcept>
@@ -17,6 +19,7 @@
 #include <vector>
 
 #include "DataProc.h"
+#include "GreedyRlPolicy.h"
 
 namespace {
 
@@ -76,6 +79,21 @@ struct RankedProcess {
     int alternative_gain;
     int machine_workload;
     int start_time;
+};
+
+enum class GreedyRlMoveType {
+    Sequence = 0,
+    Machine = 1,
+    Swap = 2
+};
+
+struct GreedyRlAction {
+    GreedyRlMoveType type = GreedyRlMoveType::Sequence;
+    int source_machine_index = -1;
+    int target_machine_index = -1;
+    int source_position = -1;
+    int target_position = -1;
+    GreedyRlFeatures features{};
 };
 
 struct EvaluationBudget {
@@ -259,6 +277,381 @@ std::unordered_map<long long, int> BuildStartTimeMap(const Schedule &schedule) {
         }
     }
     return start_time_map;
+}
+
+int CountOperations(const std::vector<Schedule_item> &schedule_items) {
+    int operation_count = 0;
+    for (const auto &schedule_item : schedule_items) {
+        operation_count += static_cast<int>(schedule_item.schedule_process.size());
+    }
+    return operation_count;
+}
+
+double BoundedRatio(const double numerator, const double denominator) {
+    return std::clamp(
+        numerator / std::max(1.0, denominator),
+        -2.0,
+        2.0
+    );
+}
+
+GreedyRlFeatures BuildGreedyRlFeatures(
+    const GreedyRlMoveType move_type,
+    const int slack,
+    const int current_processing_time,
+    const int target_processing_time,
+    const int source_workload,
+    const int target_workload,
+    const int source_position,
+    const int target_position,
+    const int source_length,
+    const int target_length,
+    const int operation_count,
+    const int makespan
+) {
+    GreedyRlFeatures features{};
+    features[0] = move_type == GreedyRlMoveType::Sequence ? 1.0 : 0.0;
+    features[1] = move_type == GreedyRlMoveType::Machine ? 1.0 : 0.0;
+    features[2] = move_type == GreedyRlMoveType::Swap ? 1.0 : 0.0;
+    features[3] = slack == 0 ? 1.0 : 0.0;
+    features[4] = BoundedRatio(slack, makespan);
+    features[5] = BoundedRatio(current_processing_time, makespan);
+    features[6] = BoundedRatio(target_processing_time, makespan);
+    features[7] = BoundedRatio(
+        current_processing_time - target_processing_time,
+        makespan
+    );
+    features[8] = BoundedRatio(source_workload, makespan);
+    features[9] = BoundedRatio(target_workload, makespan);
+    features[10] = BoundedRatio(
+        source_workload - target_workload,
+        makespan
+    );
+    features[11] = BoundedRatio(source_position, source_length - 1);
+    features[12] = BoundedRatio(target_position, target_length);
+    features[13] = BoundedRatio(
+        std::abs(target_position - source_position),
+        std::max(source_length, target_length)
+    );
+    features[14] = BoundedRatio(source_length, operation_count);
+    features[15] = BoundedRatio(target_length, operation_count);
+    return features;
+}
+
+void GenerateRlSequenceActions(
+    const Schedule &schedule,
+    const std::vector<Job> &jobs,
+    const std::vector<std::string> &process_list,
+    std::vector<GreedyRlAction> &actions
+) {
+    const auto &items = schedule.get_schedule_items();
+    const auto location_map = BuildProcessLocationMap(items);
+    const auto job_id_map = BuildJobIdMap(jobs);
+    const auto workloads = BuildMachineWorkloads(items, job_id_map);
+    const auto slack = schedule.GetProcessSlack();
+    const int operation_count = CountOperations(items);
+
+    for (const auto &process_key : process_list) {
+        const auto process = ParseProcessKey(process_key);
+        if (!process.has_value()) {
+            continue;
+        }
+        const auto location_it = location_map.find(BuildProcessId(
+            process->first,
+            process->second
+        ));
+        const auto job_it = job_id_map.find(process->first);
+        if (location_it == location_map.end() || job_it == job_id_map.end()) {
+            continue;
+        }
+        const Job_process *job_process = FindJobProcess(
+            *job_it->second,
+            process->second
+        );
+        if (job_process == nullptr) {
+            continue;
+        }
+        const int machine_index = location_it->second.machine_index;
+        const int source_position = location_it->second.item_index;
+        const int process_count = static_cast<int>(
+            items[machine_index].schedule_process.size()
+        );
+        if (process_count <= 1) {
+            continue;
+        }
+        const int processing_time = GetProcessingTime(
+            *job_process,
+            items[machine_index].machine_id
+        );
+        const int process_slack = slack.contains(process_key)
+            ? slack.at(process_key)
+            : 0;
+        for (int target_position = 0;
+             target_position < process_count;
+             ++target_position) {
+            if (target_position == source_position) {
+                continue;
+            }
+            actions.push_back({
+                GreedyRlMoveType::Sequence,
+                machine_index,
+                machine_index,
+                source_position,
+                target_position,
+                BuildGreedyRlFeatures(
+                    GreedyRlMoveType::Sequence,
+                    process_slack,
+                    processing_time,
+                    processing_time,
+                    workloads[machine_index],
+                    workloads[machine_index],
+                    source_position,
+                    target_position,
+                    process_count,
+                    process_count - 1,
+                    operation_count,
+                    schedule.get_TotalTime()
+                )
+            });
+        }
+    }
+}
+
+void GenerateRlMachineActions(
+    const Schedule &schedule,
+    const std::vector<Job> &jobs,
+    const std::vector<std::string> &process_list,
+    std::vector<GreedyRlAction> &actions
+) {
+    const auto &items = schedule.get_schedule_items();
+    const auto location_map = BuildProcessLocationMap(items);
+    const auto machine_index_map = BuildMachineIndexMap(items);
+    const auto job_id_map = BuildJobIdMap(jobs);
+    const auto workloads = BuildMachineWorkloads(items, job_id_map);
+    const auto slack = schedule.GetProcessSlack();
+    const int operation_count = CountOperations(items);
+
+    for (const auto &process_key : process_list) {
+        const auto process = ParseProcessKey(process_key);
+        if (!process.has_value()) {
+            continue;
+        }
+        const auto location_it = location_map.find(BuildProcessId(
+            process->first,
+            process->second
+        ));
+        const auto job_it = job_id_map.find(process->first);
+        if (location_it == location_map.end() || job_it == job_id_map.end()) {
+            continue;
+        }
+        const Job_process *job_process = FindJobProcess(
+            *job_it->second,
+            process->second
+        );
+        if (job_process == nullptr || job_process->process_item.size() <= 1) {
+            continue;
+        }
+
+        const int source_machine_index = location_it->second.machine_index;
+        const int source_position = location_it->second.item_index;
+        const int source_machine_id = items[source_machine_index].machine_id;
+        const int source_length = static_cast<int>(
+            items[source_machine_index].schedule_process.size()
+        );
+        const int current_processing_time = GetProcessingTime(
+            *job_process,
+            source_machine_id
+        );
+        const int process_slack = slack.contains(process_key)
+            ? slack.at(process_key)
+            : 0;
+
+        std::vector<const Process_item *> machine_options;
+        for (const auto &option : job_process->process_item) {
+            machine_options.push_back(&option);
+        }
+        std::stable_sort(
+            machine_options.begin(),
+            machine_options.end(),
+            [&machine_index_map, &workloads](
+                const Process_item *left,
+                const Process_item *right
+            ) {
+                const auto left_it = machine_index_map.find(left->machine_id);
+                const auto right_it = machine_index_map.find(right->machine_id);
+                const int left_estimate = left_it == machine_index_map.end()
+                    ? INT_MAX
+                    : workloads[left_it->second] + left->process_time;
+                const int right_estimate = right_it == machine_index_map.end()
+                    ? INT_MAX
+                    : workloads[right_it->second] + right->process_time;
+                if (left_estimate != right_estimate) {
+                    return left_estimate < right_estimate;
+                }
+                return left->process_time < right->process_time;
+            }
+        );
+
+        std::unordered_set<int> visited_machines;
+        for (const Process_item *option : machine_options) {
+            if (option->machine_id == source_machine_id ||
+                !visited_machines.insert(option->machine_id).second) {
+                continue;
+            }
+            const auto target_it = machine_index_map.find(option->machine_id);
+            if (target_it == machine_index_map.end()) {
+                continue;
+            }
+            const int target_machine_index = target_it->second;
+            const int target_length = static_cast<int>(
+                items[target_machine_index].schedule_process.size()
+            );
+            for (int target_position = 0;
+                 target_position <= target_length;
+                 ++target_position) {
+                actions.push_back({
+                    GreedyRlMoveType::Machine,
+                    source_machine_index,
+                    target_machine_index,
+                    source_position,
+                    target_position,
+                    BuildGreedyRlFeatures(
+                        GreedyRlMoveType::Machine,
+                        process_slack,
+                        current_processing_time,
+                        option->process_time,
+                        workloads[source_machine_index],
+                        workloads[target_machine_index],
+                        source_position,
+                        target_position,
+                        source_length,
+                        target_length,
+                        operation_count,
+                        schedule.get_TotalTime()
+                    )
+                });
+            }
+        }
+    }
+}
+
+void GenerateRlSwapActions(
+    const Schedule &schedule,
+    const std::vector<Job> &jobs,
+    const std::vector<std::string> &process_list,
+    std::vector<GreedyRlAction> &actions
+) {
+    const auto &items = schedule.get_schedule_items();
+    const auto location_map = BuildProcessLocationMap(items);
+    const auto job_id_map = BuildJobIdMap(jobs);
+    const auto workloads = BuildMachineWorkloads(items, job_id_map);
+    const auto slack = schedule.GetProcessSlack();
+    const int operation_count = CountOperations(items);
+    struct SwapProcess {
+        int machine_index;
+        int position;
+        int processing_time;
+        int slack;
+    };
+    std::vector<SwapProcess> processes;
+    for (const auto &process_key : process_list) {
+        const auto process = ParseProcessKey(process_key);
+        if (!process.has_value()) {
+            continue;
+        }
+        const auto location_it = location_map.find(BuildProcessId(
+            process->first,
+            process->second
+        ));
+        const auto job_it = job_id_map.find(process->first);
+        if (location_it == location_map.end() || job_it == job_id_map.end()) {
+            continue;
+        }
+        const Job_process *job_process = FindJobProcess(
+            *job_it->second,
+            process->second
+        );
+        if (job_process == nullptr) {
+            continue;
+        }
+        processes.push_back({
+            location_it->second.machine_index,
+            location_it->second.item_index,
+            GetProcessingTime(
+                *job_process,
+                items[location_it->second.machine_index].machine_id
+            ),
+            slack.contains(process_key) ? slack.at(process_key) : 0
+        });
+    }
+
+    for (int left = 0; left < static_cast<int>(processes.size()); ++left) {
+        for (int right = left + 1;
+             right < static_cast<int>(processes.size());
+             ++right) {
+            if (processes[left].machine_index != processes[right].machine_index ||
+                processes[left].position == processes[right].position) {
+                continue;
+            }
+            const int machine_index = processes[left].machine_index;
+            const int process_count = static_cast<int>(
+                items[machine_index].schedule_process.size()
+            );
+            actions.push_back({
+                GreedyRlMoveType::Swap,
+                machine_index,
+                machine_index,
+                processes[left].position,
+                processes[right].position,
+                BuildGreedyRlFeatures(
+                    GreedyRlMoveType::Swap,
+                    processes[left].slack,
+                    processes[left].processing_time,
+                    processes[right].processing_time,
+                    workloads[machine_index],
+                    workloads[machine_index],
+                    processes[left].position,
+                    processes[right].position,
+                    process_count,
+                    process_count,
+                    operation_count,
+                    schedule.get_TotalTime()
+                )
+            });
+        }
+    }
+}
+
+std::vector<Schedule_item> ApplyGreedyRlAction(
+    const std::vector<Schedule_item> &original_items,
+    const GreedyRlAction &action
+) {
+    std::vector<Schedule_item> candidate_items = original_items;
+    if (action.type == GreedyRlMoveType::Swap) {
+        auto &processes =
+            candidate_items[action.source_machine_index].schedule_process;
+        std::swap(
+            processes[action.source_position],
+            processes[action.target_position]
+        );
+        return candidate_items;
+    }
+
+    auto &source_processes =
+        candidate_items[action.source_machine_index].schedule_process;
+    const Schedule_process moved_process = source_processes[action.source_position];
+    source_processes.erase(source_processes.begin() + action.source_position);
+    candidate_items[action.source_machine_index].process_count =
+        static_cast<int>(source_processes.size());
+    auto &target_processes =
+        candidate_items[action.target_machine_index].schedule_process;
+    target_processes.insert(
+        target_processes.begin() + action.target_position,
+        moved_process
+    );
+    candidate_items[action.target_machine_index].process_count =
+        static_cast<int>(target_processes.size());
+    return candidate_items;
 }
 
 std::vector<std::string> RankCriticalProcesses(
@@ -452,6 +845,70 @@ void ConsiderCandidate(
         CalculateTotalFailureRate(candidate, machines);
         best_schedule = std::move(candidate);
     }
+}
+
+Schedule FindBestRlNeighbor(
+    const Schedule &schedule,
+    const std::vector<Job> &jobs,
+    const std::vector<std::string> &job_list,
+    const std::vector<std::string> &sequence_processes,
+    const std::vector<std::string> &machine_processes,
+    std::vector<Machine> &machines,
+    const bool include_sequence,
+    const bool include_machine,
+    const bool include_swap,
+    const int maximum_evaluations,
+    const SearchDeadline deadline
+) {
+    std::vector<GreedyRlAction> actions;
+    if (include_sequence) {
+        GenerateRlSequenceActions(schedule, jobs, sequence_processes, actions);
+    }
+    if (include_machine) {
+        GenerateRlMachineActions(schedule, jobs, machine_processes, actions);
+    }
+    if (include_swap) {
+        GenerateRlSwapActions(schedule, jobs, sequence_processes, actions);
+    }
+    if (actions.empty()) {
+        return schedule;
+    }
+
+    std::vector<GreedyRlFeatures> features;
+    features.reserve(actions.size());
+    for (const auto &action : actions) {
+        features.push_back(action.features);
+    }
+    const std::vector<std::size_t> selected_indices =
+        SelectGreedyRlCandidates(
+            features,
+            maximum_evaluations,
+            CountOperations(schedule.get_schedule_items())
+        );
+    EvaluationBudget budget{0, maximum_evaluations, deadline};
+    Schedule best_schedule = schedule;
+    const auto &original_items = schedule.get_schedule_items();
+    for (const std::size_t index : selected_indices) {
+        if (index >= actions.size() || !budget.Take()) {
+            break;
+        }
+        Schedule candidate;
+        if (!EvaluateCandidate(
+                schedule,
+                ApplyGreedyRlAction(original_items, actions[index]),
+                jobs,
+                job_list,
+                machines,
+                candidate
+            )) {
+            continue;
+        }
+        if (IsBetterSchedule(candidate, best_schedule)) {
+            CalculateTotalFailureRate(candidate, machines);
+            best_schedule = std::move(candidate);
+        }
+    }
+    return best_schedule;
 }
 
 Schedule FindBestSequenceNeighbor(
@@ -706,6 +1163,121 @@ Schedule FindBestCompoundNeighbor(
     return best_schedule;
 }
 
+Schedule FindBestBaselineGreedyStep(
+    const Schedule &schedule,
+    const std::vector<Job> &jobs,
+    const std::vector<std::string> &job_list,
+    std::vector<Machine> &machines,
+    const SearchDeadline deadline
+) {
+    const auto sequence_processes = RankCriticalProcesses(
+        schedule,
+        jobs,
+        false
+    );
+    const auto move_processes = RankCriticalProcesses(
+        schedule,
+        jobs,
+        true
+    );
+    EvaluationBudget sequence_budget{
+        0,
+        kMaxSequenceEvaluationsPerStep,
+        deadline
+    };
+    EvaluationBudget move_budget{
+        0,
+        kMaxMachineMoveEvaluationsPerStep,
+        deadline
+    };
+    Schedule best_schedule = FindBestSequenceNeighbor(
+        schedule,
+        jobs,
+        job_list,
+        sequence_processes,
+        machines,
+        sequence_budget
+    );
+    const Schedule move_schedule = FindBestMachineMoveNeighbor(
+        schedule,
+        jobs,
+        job_list,
+        move_processes,
+        machines,
+        move_budget
+    );
+    if (IsBetterSchedule(move_schedule, best_schedule)) {
+        best_schedule = move_schedule;
+    }
+
+    if (best_schedule.get_TotalTime() >= schedule.get_TotalTime() &&
+        !SearchDeadlineReached(deadline)) {
+        const auto near_sequence_processes = RankCriticalProcesses(
+            schedule,
+            jobs,
+            false,
+            true
+        );
+        const auto near_move_processes = RankCriticalProcesses(
+            schedule,
+            jobs,
+            true,
+            true
+        );
+        EvaluationBudget near_sequence_budget{
+            0,
+            kMaxNearCriticalSequenceEvaluations,
+            deadline
+        };
+        EvaluationBudget near_move_budget{
+            0,
+            kMaxNearCriticalMachineEvaluations,
+            deadline
+        };
+        const Schedule near_sequence_schedule = FindBestSequenceNeighbor(
+            schedule,
+            jobs,
+            job_list,
+            near_sequence_processes,
+            machines,
+            near_sequence_budget
+        );
+        const Schedule near_move_schedule = FindBestMachineMoveNeighbor(
+            schedule,
+            jobs,
+            job_list,
+            near_move_processes,
+            machines,
+            near_move_budget
+        );
+        best_schedule = near_sequence_schedule;
+        if (IsBetterSchedule(near_move_schedule, best_schedule)) {
+            best_schedule = near_move_schedule;
+        }
+    }
+
+    if (best_schedule.get_TotalTime() >= schedule.get_TotalTime() &&
+        !SearchDeadlineReached(deadline)) {
+        EvaluationBudget compound_budget{
+            0,
+            kMaxCompoundEvaluations,
+            deadline
+        };
+        const Schedule compound_schedule = FindBestCompoundNeighbor(
+            schedule,
+            jobs,
+            job_list,
+            sequence_processes,
+            machines,
+            compound_budget
+        );
+        if (IsBetterSchedule(compound_schedule, best_schedule)) {
+            best_schedule = compound_schedule;
+        }
+    }
+    return best_schedule;
+}
+
 }  // namespace
 
 Schedule GreedySearch(
@@ -721,6 +1293,7 @@ Schedule GreedySearch(
         return current_schedule;
     }
     gActiveCandidateWindow = gNextCandidateWindow++;
+    const bool use_rl_policy = GreedyRlPolicyEnabled();
 
     int neutral_move_count = 0;
     for (int iteration = 0; iteration < iter_count; ++iteration) {
@@ -735,36 +1308,53 @@ Schedule GreedySearch(
             break;
         }
 
-        EvaluationBudget sequence_budget{
-            0,
-            kMaxSequenceEvaluationsPerStep,
-            deadline
-        };
-        EvaluationBudget move_budget{
-            0,
-            kMaxMachineMoveEvaluationsPerStep,
-            deadline
-        };
-        const Schedule sequence_schedule = FindBestSequenceNeighbor(
-            current_schedule,
-            jobs,
-            jobList,
-            sequence_processes,
-            machines,
-            sequence_budget
-        );
-        const Schedule move_schedule = FindBestMachineMoveNeighbor(
-            current_schedule,
-            jobs,
-            jobList,
-            move_processes,
-            machines,
-            move_budget
-        );
-
-        Schedule best_neighbor = sequence_schedule;
-        if (IsBetterSchedule(move_schedule, best_neighbor)) {
-            best_neighbor = move_schedule;
+        Schedule best_neighbor = current_schedule;
+        if (use_rl_policy) {
+            best_neighbor = FindBestRlNeighbor(
+                current_schedule,
+                jobs,
+                jobList,
+                sequence_processes,
+                move_processes,
+                machines,
+                true,
+                true,
+                false,
+                kMaxSequenceEvaluationsPerStep +
+                    kMaxMachineMoveEvaluationsPerStep,
+                deadline
+            );
+        } else {
+            EvaluationBudget sequence_budget{
+                0,
+                kMaxSequenceEvaluationsPerStep,
+                deadline
+            };
+            EvaluationBudget move_budget{
+                0,
+                kMaxMachineMoveEvaluationsPerStep,
+                deadline
+            };
+            const Schedule sequence_schedule = FindBestSequenceNeighbor(
+                current_schedule,
+                jobs,
+                jobList,
+                sequence_processes,
+                machines,
+                sequence_budget
+            );
+            const Schedule move_schedule = FindBestMachineMoveNeighbor(
+                current_schedule,
+                jobs,
+                jobList,
+                move_processes,
+                machines,
+                move_budget
+            );
+            best_neighbor = sequence_schedule;
+            if (IsBetterSchedule(move_schedule, best_neighbor)) {
+                best_neighbor = move_schedule;
+            }
         }
 
         // Near-critical moves are substantially more expensive and rarely
@@ -783,35 +1373,52 @@ Schedule GreedySearch(
                 true,
                 true
             );
-            EvaluationBudget near_sequence_budget{
-                0,
-                kMaxNearCriticalSequenceEvaluations,
-                deadline
-            };
-            EvaluationBudget near_move_budget{
-                0,
-                kMaxNearCriticalMachineEvaluations,
-                deadline
-            };
-            const Schedule near_sequence_schedule = FindBestSequenceNeighbor(
-                current_schedule,
-                jobs,
-                jobList,
-                near_sequence_processes,
-                machines,
-                near_sequence_budget
-            );
-            const Schedule near_move_schedule = FindBestMachineMoveNeighbor(
-                current_schedule,
-                jobs,
-                jobList,
-                near_move_processes,
-                machines,
-                near_move_budget
-            );
-            best_neighbor = near_sequence_schedule;
-            if (IsBetterSchedule(near_move_schedule, best_neighbor)) {
-                best_neighbor = near_move_schedule;
+            if (use_rl_policy) {
+                best_neighbor = FindBestRlNeighbor(
+                    current_schedule,
+                    jobs,
+                    jobList,
+                    near_sequence_processes,
+                    near_move_processes,
+                    machines,
+                    true,
+                    true,
+                    false,
+                    kMaxNearCriticalSequenceEvaluations +
+                        kMaxNearCriticalMachineEvaluations,
+                    deadline
+                );
+            } else {
+                EvaluationBudget near_sequence_budget{
+                    0,
+                    kMaxNearCriticalSequenceEvaluations,
+                    deadline
+                };
+                EvaluationBudget near_move_budget{
+                    0,
+                    kMaxNearCriticalMachineEvaluations,
+                    deadline
+                };
+                const Schedule near_sequence_schedule = FindBestSequenceNeighbor(
+                    current_schedule,
+                    jobs,
+                    jobList,
+                    near_sequence_processes,
+                    machines,
+                    near_sequence_budget
+                );
+                const Schedule near_move_schedule = FindBestMachineMoveNeighbor(
+                    current_schedule,
+                    jobs,
+                    jobList,
+                    near_move_processes,
+                    machines,
+                    near_move_budget
+                );
+                best_neighbor = near_sequence_schedule;
+                if (IsBetterSchedule(near_move_schedule, best_neighbor)) {
+                    best_neighbor = near_move_schedule;
+                }
             }
         }
 
@@ -821,21 +1428,62 @@ Schedule GreedySearch(
                 jobs,
                 jobList
             );
-            EvaluationBudget compound_budget{
-                0,
-                kMaxCompoundEvaluations,
-                deadline
-            };
-            const Schedule compound_schedule = FindBestCompoundNeighbor(
+            Schedule compound_schedule = current_schedule;
+            if (use_rl_policy) {
+                compound_schedule = FindBestRlNeighbor(
+                    current_schedule,
+                    jobs,
+                    jobList,
+                    compound_processes,
+                    {},
+                    machines,
+                    false,
+                    false,
+                    true,
+                    kMaxCompoundEvaluations,
+                    deadline
+                );
+            } else {
+                EvaluationBudget compound_budget{
+                    0,
+                    kMaxCompoundEvaluations,
+                    deadline
+                };
+                compound_schedule = FindBestCompoundNeighbor(
+                    current_schedule,
+                    jobs,
+                    jobList,
+                    compound_processes,
+                    machines,
+                    compound_budget
+                );
+            }
+            if (IsBetterSchedule(compound_schedule, best_neighbor)) {
+                best_neighbor = compound_schedule;
+            }
+        }
+
+        const bool verify_with_baseline = use_rl_policy &&
+            GetGreedyRlRuntimeConfig().verify_with_baseline;
+        const bool fallback_after_miss = use_rl_policy &&
+            GetGreedyRlRuntimeConfig().fallback_on_miss &&
+            !IsBetterSchedule(best_neighbor, current_schedule);
+        if ((verify_with_baseline || fallback_after_miss) &&
+            !SearchDeadlineReached(deadline)) {
+            if (verify_with_baseline) {
+                RecordGreedyRlVerification();
+            } else {
+                RecordGreedyRlFallback();
+            }
+            const Schedule fallback_schedule = FindBestBaselineGreedyStep(
                 current_schedule,
                 jobs,
                 jobList,
-                compound_processes,
                 machines,
-                compound_budget
+                deadline
             );
-            if (IsBetterSchedule(compound_schedule, best_neighbor)) {
-                best_neighbor = compound_schedule;
+            if (IsBetterSchedule(fallback_schedule, best_neighbor)) {
+                best_neighbor = fallback_schedule;
             }
         }
 

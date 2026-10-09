@@ -14,7 +14,8 @@ HLS-FJSP 是一个使用 C++ 实现的柔性作业车间调度问题（FJSP）�
 4. 贪心搜索先围绕零松弛关键工序执行同机重插入和跨机迁移；只有关键邻域没有改进时，才用较小预算检查近关键工序。
 5. 自适应调度器根据刷新全局最优的近期收益、单位时间收益和失败冷却选择搜索方法。深度停滞时增加探索和多样化起点，但仍由实测收益决定；最后 10% 时间继续保留短 GA。
 6. 对至少 80 道工序的实例，停滞后可调用 Guided Insertion：从最多 6 条持久轨迹生成关键/近关键跨机插入动作，分层选择最多 48 个候选做精确评价。`HLS_ENABLE_GUIDED_SEARCH=0` 可关闭，`force` 可忽略规模门槛。
-7. 每个候选方案都重新构造有向图，并通过拓扑排序计算最长路径作为 makespan。
+7. Greedy 可选用 HLS 自主训练的 PPO Actor 对同机重插入、跨机插入和同机交换动作排序，只精确评价 Top-K；Tabu 也可暂时复用同一模型筛选五类邻域。两者默认关闭，模型不可用时分别回退原始搜索。
+8. 每个被选中的候选方案都重新构造有向图，并通过拓扑排序计算最长路径作为 makespan。
 
 默认 COPT 初始解时间为 `300` 秒，总优化时间为 `3600` 秒；总时间从 COPT 求解前开始计时，因此 COPT 时间包含在总限制内。
 
@@ -35,6 +36,80 @@ export LD_LIBRARY_PATH="$COPT_HOME/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
 如果 `~/.zshrc` 属于 `root`，普通用户不能直接写入。可以先在当前终端执行上面的命令；需要永久生效时，应修复该文件的所有者，或让管理员将这些变量写入用户可读写的 shell 配置文件。
+
+## 强化学习开发环境
+
+用于后续 Greedy/Tabu 候选排序、图策略网络和 PPO 实验的独立 Conda 环境名为 `hls-rl`。当前机器上的环境使用 Python 3.11、PyTorch 2.5.1（CUDA 12.4 Runtime）和 PyG 2.6.1，已在 Tesla V100-PCIE-32GB（`sm_70`）上通过图卷积前向、反向传播测试。环境自带 CUDA Runtime，不要求系统安装 `nvcc`，但仍依赖可用的 NVIDIA 驱动。
+
+激活环境：
+
+```bash
+source "$HOME/miniconda3/etc/profile.d/conda.sh"
+conda activate hls-rl
+```
+
+检查 GPU：
+
+```bash
+python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+```
+
+在其他机器上可根据仓库中的 `environment-rl.yml` 重建：
+
+```bash
+conda env create -f environment-rl.yml
+conda activate hls-rl
+```
+
+该环境同时保留 `gym==0.26.2` 以兼容传统 Gym API，并提供 `gymnasium` 供新代码使用。`torch-geometric` 用于 GIN/GAT 图模型，TensorBoard 用于训练监控，ONNX 用于后续模型导出。Jupyter kernel 名称为 `Python (hls-rl)`。
+
+HLS 自主实现的 Greedy PPO 训练、测试、模型导出和 C++ 开关见 [rl_greedy/README.md](rl_greedy/README.md)。该实现不依赖 L2S 的 Python 模块或已有模型。
+
+当前综合表现最好的固定版本使用每实例 profile，运行命令为：
+
+```bash
+cd /home/luopw24/HLS && PARALLEL_JOBS=5 ./run_best_rl_experiments.sh
+```
+
+该脚本保持 Greedy、GA、Tabu，启用 Greedy RL 与 Tabu RL，并按实例固定已验证的 seed、候选预算和方法加成。最佳已观测组合及证据日志见 [best-rl-results.md](best-rl-results.md)：Mk01～Mk10 中 8 个优于 L2S 十次均值、2 个持平、0 个落后。
+
+脚本默认把日志、`result.csv` 和 `comparison_l2s.csv` 写入 `run_logs/<运行时间>/`。`COPT_TIME_OVERRIDE`、`TOTAL_TIME_OVERRIDE` 和 `TARGET_MAKESPAN_OVERRIDE` 仅用于短时验证；不设置时使用各实例的固定正式参数。
+
+### Greedy PPO 训练与测试
+
+小批量训练：
+
+```bash
+cd /home/luopw24/HLS && source "$HOME/miniconda3/etc/profile.d/conda.sh" && conda activate hls-rl && python -m rl_greedy.train --epochs 5 --episodes-per-epoch 4 --horizon 10 --ppo-epochs 2 --ranking-epochs 2 --ranking-temperature 0.05 --hidden-size 32 --learning-rate 0.0003 --min-jobs 10 --max-jobs 12 --min-machines 4 --max-machines 8 --min-operations 3 --max-operations 15 --max-machine-options 6 --min-processing-time 1 --max-processing-time 20 --device cuda --seed 20260928 --checkpoint rl_greedy/models/greedy_policy_small.pt --export rl_greedy/models/greedy_policy_small.txt
+```
+
+测试小批量模型：
+
+```bash
+python -m rl_greedy.evaluate datasets/Brandimarte_Data/Text/Mk01.fjs datasets/Brandimarte_Data/Text/Mk02.fjs --model rl_greedy/models/greedy_policy_small.txt --top-k 96 --steps 10 --device cuda
+```
+
+完整训练：
+
+```bash
+cd /home/luopw24/HLS && source "$HOME/miniconda3/etc/profile.d/conda.sh" && conda activate hls-rl && python -m rl_greedy.train --epochs 200 --episodes-per-epoch 8 --horizon 30 --ppo-epochs 4 --ranking-epochs 2 --ranking-temperature 0.05 --ranking-state-batch-size 8 --hidden-size 64 --learning-rate 0.0002 --min-jobs 10 --max-jobs 20 --min-machines 4 --max-machines 15 --min-operations 3 --max-operations 15 --max-machine-options 6 --min-processing-time 1 --max-processing-time 20 --device cuda --seed 20260928 --checkpoint rl_greedy/models/greedy_policy_brandimarte.pt --export rl_greedy/models/greedy_policy_brandimarte.txt
+```
+
+在 Brandimarte 的 Mk01～Mk10 上各测试一次，并将结果写入独立时间目录：
+
+```bash
+python -m rl_greedy.evaluate datasets/Brandimarte_Data/Text/Mk*.fjs --model rl_greedy/models/greedy_policy_brandimarte.txt --top-k 96 --dynamic-top-k --rule-fraction 0.25 --exploration 0.15 --temperature 1.0 --steps 10 --device cuda --seed 20260928 --output "rl_greedy/results/$(date +%Y%m%d_%H%M%S)/result.csv"
+```
+
+模型文件只会在所有训练 epoch 完成后输出。`Mk*.fjs` 中的 `*` 不要使用反斜杠转义。评估器对展开后的每个实例只执行一次，并在 CSV 中记录 `run=1`、实例 seed、模型绝对路径及 SHA-256、Top-K、最大步数、初始/基线/RL makespan、精确评价次数和实际搜索步数。
+
+使用训练后的模型依次运行完整 HLS，Mk01～Mk10 各运行一次：
+
+```bash
+cd /home/luopw24/HLS && COPT_HOME="$HOME/copt80" COPT_LICENSE_DIR="$HOME/copt80" LD_LIBRARY_PATH="$HOME/copt80/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" HLS_GREEDY_RL=1 HLS_GREEDY_RL_MODEL=/home/luopw24/HLS/rl_greedy/models/greedy_policy_brandimarte.txt HLS_GREEDY_RL_TOP_K=96 HLS_GREEDY_RL_DYNAMIC_TOP_K=1 HLS_GREEDY_RL_RULE_FRACTION=0.25 HLS_GREEDY_RL_FALLBACK_ON_MISS=1 HLS_GREEDY_RL_TEMPERATURE=1.0 HLS_GREEDY_RL_EXPLORATION=0.15 HLS_TABU_RL=1 HLS_TABU_RL_MODEL=/home/luopw24/HLS/rl_greedy/models/greedy_policy_brandimarte.txt HLS_TABU_RL_TOP_K=256 HLS_TABU_RL_DYNAMIC_TOP_K=1 HLS_TABU_RL_RULE_FRACTION=0.30 HLS_TABU_RL_EXPLORATION=0.20 HLS_TABU_RL_MIN_PER_NEIGHBORHOOD=16 HLS_TABU_RL_FALLBACK_ON_MISS=1 RUNS=1 PARALLEL_JOBS=1 SKIP_COMPLETED=0 EXECUTABLE=./build/production_scheduling ./run_brandimarte_experiments.sh
+```
+
+该命令同时启用 Greedy PPO 与 Tabu RL 邻域筛选，并保留 GA 和默认规模门控下的 Guided 搜索。Tabu 当前复用 Greedy 模型，但有独立的候选预算、30% 规则保底、20% 探索、五类邻域最低配额和 fallback。`RUNS=1` 表示每个实例运行一次，`PARALLEL_JOBS=1` 保证 Mk01～Mk10 顺序执行。完整日志和汇总结果分别写入 `run_logs/<运行时间>/MkXX_run01.txt` 与 `run_logs/<运行时间>/result.csv`。模型推理由 C++ 原生执行，不需要激活 Conda，也不使用 GPU。启动日志应同时出现 `greedy_rl_enabled: true`、`tabu_rl_enabled: true` 和对应的 `model loaded` 状态；模型不可用时各方法自动回退原始搜索。
 
 ## 编译
 
@@ -134,8 +209,11 @@ INSTANCES="Mk08 Mk09 Mk10" AGGREGATE_INSTANCES="Mk01 Mk02 Mk03 Mk04 Mk05 Mk06 Mk
 - `CoptInitialSolution.cpp`：COPT FJSP 初始解模型及解提取。
 - `DataProc.cpp`：数据读取、调度图构造、makespan 计算和停止判断。
 - `GreedySearch.cpp`：交换和迁移邻域的贪心搜索。
+- `GreedyRlPolicy.cpp`：Greedy PPO Actor 文本模型加载、原生打分及 Top-K/探索候选选择。
+- `rl_greedy/`：HLS 自主实现的 FJSP 强化学习环境、PPO 训练、评估和模型导出。
 - `RandomSearch.cpp`：持久化遗传搜索、关键路径变异、编码解码及兼容旧调用的搜索分派接口。
 - `TabuSearch.cpp`：关键块 N5/N6、独立邻域配额、跨调用轨迹、移动属性禁忌和停滞恢复。
+- `TabuRlPolicy.cpp`：复用 Greedy Actor 权重的 Tabu 候选筛选、动态预算、规则保底和探索。
 - `GuidedSearch.cpp`：关键/近关键跨机插入、分层 Top-K 精确评价、多轨迹和访问记忆。
 - `Schedule.cpp`：调度对象及关键路径工序计算。
 - `run_brandimarte_experiments.sh`：并行批量实验和 `result.csv` 汇总。

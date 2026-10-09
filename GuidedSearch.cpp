@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <deque>
 #include <limits>
 #include <optional>
@@ -25,6 +26,18 @@ constexpr int kMaximumRecentSchedules = 128;
 constexpr int kMaximumNeutralMoves = 4;
 constexpr int kMaximumDeterioratingMoves = 4;
 constexpr int kTrajectoryRestartStagnation = 10;
+
+int GuidedExactCandidateLimit() {
+    const char *value = std::getenv("HLS_GUIDED_TOP_K");
+    if (value == nullptr) {
+        return kMaximumExactCandidates;
+    }
+    try {
+        return std::clamp(std::stoi(value), 1, 512);
+    } catch (const std::exception &) {
+        return kMaximumExactCandidates;
+    }
+}
 
 struct ProcessLocation {
     int machine_index = -1;
@@ -702,7 +715,7 @@ bool AdvanceTrajectory(
     );
     actions = SelectActionsForExactEvaluation(
         std::move(actions),
-        kMaximumExactCandidates
+        GuidedExactCandidateLimit()
     );
 
     std::optional<EvaluatedAction> best_candidate;

@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
+#include <string>
 #include <vector>
 
 namespace {
@@ -14,6 +16,19 @@ constexpr int kDeepStagnation = 12;
 
 double ClampProbability(const double value) {
     return std::clamp(value, 0.0, 1.0);
+}
+
+double EnvironmentBonus(const char *name) {
+    const char *value = std::getenv(name);
+    if (value == nullptr) {
+        return 0.0;
+    }
+    try {
+        const double parsed = std::stod(value);
+        return std::isfinite(parsed) ? std::clamp(parsed, -1.0, 1.0) : 0.0;
+    } catch (const std::exception &) {
+        return 0.0;
+    }
 }
 
 }  // namespace
@@ -42,6 +57,14 @@ AdaptiveSearchController::AdaptiveSearchController(
     }
     initial_preferences_[MethodIndex(SearchMethod::Guided)] =
         guided_search_enabled_ ? 0.10 : 0.0;
+    score_bonuses_[MethodIndex(SearchMethod::Greedy)] =
+        EnvironmentBonus("HLS_GREEDY_SCORE_BONUS");
+    score_bonuses_[MethodIndex(SearchMethod::Genetic)] =
+        EnvironmentBonus("HLS_GENETIC_SCORE_BONUS");
+    score_bonuses_[MethodIndex(SearchMethod::Tabu)] =
+        EnvironmentBonus("HLS_TABU_SCORE_BONUS");
+    score_bonuses_[MethodIndex(SearchMethod::Guided)] =
+        EnvironmentBonus("HLS_GUIDED_SCORE_BONUS");
 
     pending_intensification_.push_back({SearchMethod::Greedy, true, false});
     pending_intensification_.push_back({SearchMethod::Tabu, true, false});
@@ -223,6 +246,10 @@ const SearchMethodStats &AdaptiveSearchController::GetStats(
     return statistics_[MethodIndex(method)];
 }
 
+double AdaptiveSearchController::GetScoreBonus(const SearchMethod method) const {
+    return score_bonuses_[MethodIndex(method)];
+}
+
 int AdaptiveSearchController::MethodIndex(const SearchMethod method) {
     return static_cast<int>(method);
 }
@@ -263,6 +290,7 @@ double AdaptiveSearchController::Score(
                    0.05 * initial_preferences_[index] +
                    exploration_bonus -
                    failure_penalty + recency_bonus;
+    score += score_bonuses_[index];
 
     if (method == SearchMethod::Tabu && stagnation_count >= kMildStagnation) {
         score += std::min(0.10, stagnation_count * 0.005);

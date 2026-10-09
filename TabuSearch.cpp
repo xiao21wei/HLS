@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <cstdlib>
 #include <functional>
 #include <optional>
 #include <random>
@@ -18,8 +19,10 @@
 #include <vector>
 
 #include "DataProc.h"
+#include "GreedyRlPolicy.h"
 #include "Job.h"
 #include "Schedule.h"
+#include "TabuRlPolicy.h"
 
 namespace {
 
@@ -39,6 +42,23 @@ std::mt19937 &GetTabuRng() {
 
 int RandomInteger(const int lower, const int upper) {
     return std::uniform_int_distribution<int>(lower, upper)(GetTabuRng());
+}
+
+int EnvironmentInteger(
+    const char *name,
+    const int fallback,
+    const int minimum,
+    const int maximum
+) {
+    const char *value = std::getenv(name);
+    if (value == nullptr) {
+        return fallback;
+    }
+    try {
+        return std::clamp(std::stoi(value), minimum, maximum);
+    } catch (const std::exception &) {
+        return fallback;
+    }
 }
 
 long long BuildProcessId(const int job_id, const int process_id) {
@@ -104,6 +124,23 @@ struct MoveAttribute {
     long long new_successor = kNoSuccessor;
     std::vector<std::string> extra_destination_attributes;
     std::vector<std::string> extra_reverse_attributes;
+};
+
+enum class TabuNeighborhoodType {
+    CriticalBlock = 0,
+    PathRelinking = 1,
+    MachineMove = 2,
+    Compound = 3,
+    SequenceMove = 4
+};
+
+constexpr int kTabuNeighborhoodTypeCount = 5;
+
+struct TabuRlUnevaluatedCandidate {
+    std::vector<Schedule_item> schedule_items;
+    MoveAttribute move;
+    GreedyRlFeatures features{};
+    TabuNeighborhoodType neighborhood = TabuNeighborhoodType::SequenceMove;
 };
 
 struct CandidateRecord {
@@ -200,6 +237,35 @@ int GetProcessingTime(const Job_process &job_process, const int machine_id) {
         }
     }
     return 0;
+}
+
+std::vector<int> BuildMachineWorkloads(
+    const std::vector<Schedule_item> &schedule_items,
+    const std::unordered_map<int, const Job *> &job_id_map
+) {
+    std::vector<int> workloads(schedule_items.size(), 0);
+    for (int machine_index = 0;
+         machine_index < static_cast<int>(schedule_items.size());
+         ++machine_index) {
+        const auto &schedule_item = schedule_items[machine_index];
+        for (const auto &process : schedule_item.schedule_process) {
+            const auto job_it = job_id_map.find(process.job_id);
+            if (job_it == job_id_map.end()) {
+                continue;
+            }
+            const Job_process *job_process = FindJobProcess(
+                *job_it->second,
+                process.process_id
+            );
+            if (job_process != nullptr) {
+                workloads[machine_index] += GetProcessingTime(
+                    *job_process,
+                    schedule_item.machine_id
+                );
+            }
+        }
+    }
+    return workloads;
 }
 
 int CountOperations(const std::vector<Schedule_item> &schedule_items) {
@@ -774,6 +840,204 @@ private:
     std::vector<CandidateRecord> diversification_pool_;
 };
 
+double BoundedRlRatio(const double numerator, const double denominator) {
+    return std::clamp(
+        numerator / std::max(1.0, denominator),
+        -2.0,
+        2.0
+    );
+}
+
+class TabuRlCandidateCollector {
+public:
+    TabuRlCandidateCollector(
+        const Schedule &base_schedule,
+        const std::vector<Job> &jobs,
+        const SearchDeadline deadline
+    ) : base_schedule_(base_schedule),
+        deadline_(deadline),
+        original_items_(base_schedule.get_schedule_items()),
+        original_locations_(BuildProcessLocationMap(original_items_)),
+        machine_indices_(BuildMachineIndexMap(original_items_)),
+        job_ids_(BuildJobIdMap(jobs)),
+        workloads_(BuildMachineWorkloads(original_items_, job_ids_)),
+        slack_(base_schedule.GetProcessSlack()),
+        operation_count_(CountOperations(original_items_)) {
+        candidates_.reserve(kMaxNeighborEvaluations);
+        seen_signatures_.reserve(kMaxNeighborEvaluations * 2);
+        seen_signatures_.insert(BuildScheduleSignature(original_items_));
+    }
+
+    bool Consider(
+        std::vector<Schedule_item> &&schedule_items,
+        const MoveAttribute &move,
+        const TabuNeighborhoodType neighborhood
+    ) {
+        if (!CanContinue()) {
+            return false;
+        }
+        const std::string signature = BuildScheduleSignature(schedule_items);
+        if (!seen_signatures_.insert(signature).second) {
+            return true;
+        }
+        const GreedyRlFeatures features = BuildFeatures(
+            schedule_items,
+            move,
+            neighborhood
+        );
+        candidates_.push_back({
+            std::move(schedule_items),
+            move,
+            features,
+            neighborhood
+        });
+        return CanContinue();
+    }
+
+    bool CanContinue() const {
+        return static_cast<int>(candidates_.size()) < kMaxNeighborEvaluations &&
+               !SearchDeadlineReached(deadline_);
+    }
+
+    std::vector<TabuRlUnevaluatedCandidate> &Candidates() {
+        return candidates_;
+    }
+
+private:
+    GreedyRlFeatures BuildFeatures(
+        const std::vector<Schedule_item> &candidate_items,
+        const MoveAttribute &move,
+        const TabuNeighborhoodType neighborhood
+    ) const {
+        GreedyRlFeatures features{};
+        const int job_id = static_cast<int>(move.process_identifier >> 32);
+        const int process_id = static_cast<int>(
+            static_cast<unsigned int>(move.process_identifier)
+        );
+        const auto job_it = job_ids_.find(job_id);
+        const auto source_machine_it = machine_indices_.find(move.source_machine_id);
+        const auto target_machine_it = machine_indices_.find(move.target_machine_id);
+        const auto source_location_it = original_locations_.find(
+            move.process_identifier
+        );
+        const auto candidate_locations = BuildProcessLocationMap(candidate_items);
+        const auto target_location_it = candidate_locations.find(
+            move.process_identifier
+        );
+        if (job_it == job_ids_.end() ||
+            source_machine_it == machine_indices_.end() ||
+            target_machine_it == machine_indices_.end() ||
+            source_location_it == original_locations_.end() ||
+            target_location_it == candidate_locations.end()) {
+            return features;
+        }
+        const Job_process *job_process = FindJobProcess(
+            *job_it->second,
+            process_id
+        );
+        if (job_process == nullptr) {
+            return features;
+        }
+
+        const int source_machine_index = source_machine_it->second;
+        const int target_machine_index = target_machine_it->second;
+        const int source_length = static_cast<int>(
+            original_items_[source_machine_index].schedule_process.size()
+        );
+        int target_length = static_cast<int>(
+            candidate_items[target_machine_index].schedule_process.size()
+        );
+        const bool cross_machine = move.source_machine_id != move.target_machine_id;
+        const bool swap = neighborhood == TabuNeighborhoodType::Compound;
+        if (cross_machine) {
+            target_length = std::max(0, target_length - 1);
+        } else if (!swap) {
+            target_length = std::max(0, source_length - 1);
+        }
+
+        const int source_processing_time = GetProcessingTime(
+            *job_process,
+            move.source_machine_id
+        );
+        const int target_processing_time = GetProcessingTime(
+            *job_process,
+            move.target_machine_id
+        );
+        const std::string process_key = BuildProcessKey(job_id, process_id);
+        const auto slack_it = slack_.find(process_key);
+        const int process_slack = slack_it == slack_.end() ? 0 : slack_it->second;
+        int move_type = 0;
+        if (swap) {
+            move_type = 2;
+        } else if (cross_machine) {
+            move_type = 1;
+        }
+
+        features[0] = move_type == 0 ? 1.0 : 0.0;
+        features[1] = move_type == 1 ? 1.0 : 0.0;
+        features[2] = move_type == 2 ? 1.0 : 0.0;
+        features[3] = process_slack == 0 ? 1.0 : 0.0;
+        features[4] = BoundedRlRatio(
+            process_slack,
+            base_schedule_.get_TotalTime()
+        );
+        features[5] = BoundedRlRatio(
+            source_processing_time,
+            base_schedule_.get_TotalTime()
+        );
+        features[6] = BoundedRlRatio(
+            target_processing_time,
+            base_schedule_.get_TotalTime()
+        );
+        features[7] = BoundedRlRatio(
+            source_processing_time - target_processing_time,
+            base_schedule_.get_TotalTime()
+        );
+        features[8] = BoundedRlRatio(
+            workloads_[source_machine_index],
+            base_schedule_.get_TotalTime()
+        );
+        features[9] = BoundedRlRatio(
+            workloads_[target_machine_index],
+            base_schedule_.get_TotalTime()
+        );
+        features[10] = BoundedRlRatio(
+            workloads_[source_machine_index] - workloads_[target_machine_index],
+            base_schedule_.get_TotalTime()
+        );
+        features[11] = BoundedRlRatio(
+            source_location_it->second.item_index,
+            source_length - 1
+        );
+        features[12] = BoundedRlRatio(
+            target_location_it->second.item_index,
+            target_length
+        );
+        features[13] = BoundedRlRatio(
+            std::abs(
+                target_location_it->second.item_index -
+                source_location_it->second.item_index
+            ),
+            std::max(source_length, target_length)
+        );
+        features[14] = BoundedRlRatio(source_length, operation_count_);
+        features[15] = BoundedRlRatio(target_length, operation_count_);
+        return features;
+    }
+
+    const Schedule &base_schedule_;
+    SearchDeadline deadline_;
+    const std::vector<Schedule_item> &original_items_;
+    std::unordered_map<long long, ProcessLocation> original_locations_;
+    std::unordered_map<int, int> machine_indices_;
+    std::unordered_map<int, const Job *> job_ids_;
+    std::vector<int> workloads_;
+    std::unordered_map<std::string, int> slack_;
+    int operation_count_;
+    std::unordered_set<std::string> seen_signatures_;
+    std::vector<TabuRlUnevaluatedCandidate> candidates_;
+};
+
 bool SubmitSameMachineMove(
     const std::vector<Schedule_item> &original_items,
     const int machine_index,
@@ -1297,9 +1561,30 @@ Schedule TabuSearch(
         global_best_makespan = current_schedule.get_TotalTime();
     }
     const int operation_count = CountOperations(schedule.get_schedule_items());
-    const int stagnation_limit = std::max(
+    const int default_stagnation_limit = std::max(
         8,
         std::min(40, std::max(1, max_iter_count / 3))
+    );
+    const int stagnation_limit = EnvironmentInteger(
+        "HLS_TABU_STAGNATION_LIMIT",
+        default_stagnation_limit,
+        4,
+        200
+    );
+    const int perturbation_min = EnvironmentInteger(
+        "HLS_TABU_PERTURB_MIN",
+        2,
+        1,
+        100
+    );
+    const int perturbation_max = std::max(
+        perturbation_min,
+        EnvironmentInteger(
+            "HLS_TABU_PERTURB_MAX",
+            5,
+            1,
+            100
+        )
     );
     int stagnation_count = 0;
     int perturbation_steps_remaining = 0;
@@ -1345,53 +1630,216 @@ Schedule TabuSearch(
                     std::min(20, stagnation_count * 2)
             )
         );
-        const CandidateVisitor visitor = [&](
-            std::vector<Schedule_item> &&schedule_items,
-            const MoveAttribute &move
-        ) {
-            return evaluator.Consider(std::move(schedule_items), move);
-        };
+        SelectionResult selection;
+        if (!TabuRlPolicyEnabled()) {
+            const CandidateVisitor visitor = [&](
+                std::vector<Schedule_item> &&schedule_items,
+                const MoveAttribute &move
+            ) {
+                return evaluator.Consider(std::move(schedule_items), move);
+            };
 
-        GenerateCriticalBlockNeighbors(
-            current_schedule,
-            jobs,
-            critical_processes,
-            visitor
-        );
-        if (evaluator.CanContinue() &&
-            (stagnation_count >= 4 || perturbation_steps_remaining > 0) &&
-            ScheduleToString(current_schedule) !=
-                ScheduleToString(global_best_schedule)) {
-            GeneratePathRelinkingNeighbors(
-                current_schedule,
-                global_best_schedule,
-                visitor
-            );
-        }
-        if (evaluator.CanContinue()) {
-            GenerateMachineMoveNeighbors(
+            GenerateCriticalBlockNeighbors(
                 current_schedule,
                 jobs,
                 critical_processes,
                 visitor
             );
-        }
-        if (evaluator.CanContinue() && stagnation_count >= 4) {
-            GenerateCompoundNeighbors(
+            if (evaluator.CanContinue() &&
+                (stagnation_count >= 4 || perturbation_steps_remaining > 0) &&
+                ScheduleToString(current_schedule) !=
+                    ScheduleToString(global_best_schedule)) {
+                GeneratePathRelinkingNeighbors(
+                    current_schedule,
+                    global_best_schedule,
+                    visitor
+                );
+            }
+            if (evaluator.CanContinue()) {
+                GenerateMachineMoveNeighbors(
+                    current_schedule,
+                    jobs,
+                    critical_processes,
+                    visitor
+                );
+            }
+            if (evaluator.CanContinue() && stagnation_count >= 4) {
+                GenerateCompoundNeighbors(
+                    current_schedule,
+                    critical_processes,
+                    visitor
+                );
+            }
+            if (evaluator.CanContinue()) {
+                GenerateSequenceMoveNeighbors(
+                    current_schedule,
+                    critical_processes,
+                    visitor
+                );
+            }
+            selection = evaluator.Select();
+        } else {
+            TabuRlCandidateCollector collector(
                 current_schedule,
-                critical_processes,
-                visitor
+                jobs,
+                deadline
             );
-        }
-        if (evaluator.CanContinue()) {
-            GenerateSequenceMoveNeighbors(
+            auto collector_visitor = [&](const TabuNeighborhoodType type) {
+                return CandidateVisitor([
+                    &collector,
+                    type
+                ](
+                    std::vector<Schedule_item> &&schedule_items,
+                    const MoveAttribute &move
+                ) {
+                    return collector.Consider(
+                        std::move(schedule_items),
+                        move,
+                        type
+                    );
+                });
+            };
+
+            GenerateCriticalBlockNeighbors(
                 current_schedule,
+                jobs,
                 critical_processes,
-                visitor
+                collector_visitor(TabuNeighborhoodType::CriticalBlock)
             );
+            if (collector.CanContinue() &&
+                (stagnation_count >= 4 || perturbation_steps_remaining > 0) &&
+                ScheduleToString(current_schedule) !=
+                    ScheduleToString(global_best_schedule)) {
+                GeneratePathRelinkingNeighbors(
+                    current_schedule,
+                    global_best_schedule,
+                    collector_visitor(TabuNeighborhoodType::PathRelinking)
+                );
+            }
+            if (collector.CanContinue()) {
+                GenerateMachineMoveNeighbors(
+                    current_schedule,
+                    jobs,
+                    critical_processes,
+                    collector_visitor(TabuNeighborhoodType::MachineMove)
+                );
+            }
+            if (collector.CanContinue() && stagnation_count >= 4) {
+                GenerateCompoundNeighbors(
+                    current_schedule,
+                    critical_processes,
+                    collector_visitor(TabuNeighborhoodType::Compound)
+                );
+            }
+            if (collector.CanContinue()) {
+                GenerateSequenceMoveNeighbors(
+                    current_schedule,
+                    critical_processes,
+                    collector_visitor(TabuNeighborhoodType::SequenceMove)
+                );
+            }
+
+            auto &candidates = collector.Candidates();
+            std::vector<GreedyRlFeatures> features;
+            features.reserve(candidates.size());
+            for (const auto &candidate : candidates) {
+                features.push_back(candidate.features);
+            }
+            std::vector<std::size_t> selected_indices =
+                SelectTabuRlCandidates(
+                    features,
+                    kMaxNeighborEvaluations,
+                    operation_count
+                );
+            std::vector<bool> selected_mask(candidates.size(), false);
+            for (const std::size_t index : selected_indices) {
+                if (index < selected_mask.size()) {
+                    selected_mask[index] = true;
+                }
+            }
+
+            long long safeguard_count = 0;
+            const int minimum_per_neighborhood =
+                GetTabuRlRuntimeConfig().minimum_per_neighborhood;
+            for (int type_index = 0;
+                 type_index < kTabuNeighborhoodTypeCount;
+                 ++type_index) {
+                int available = 0;
+                int already_selected = 0;
+                for (std::size_t index = 0; index < candidates.size(); ++index) {
+                    if (static_cast<int>(candidates[index].neighborhood) !=
+                        type_index) {
+                        continue;
+                    }
+                    ++available;
+                    already_selected += selected_mask[index] ? 1 : 0;
+                }
+                const int target = std::min(
+                    minimum_per_neighborhood,
+                    available
+                );
+                for (std::size_t index = 0;
+                     index < candidates.size() && already_selected < target;
+                     ++index) {
+                    if (static_cast<int>(candidates[index].neighborhood) ==
+                            type_index &&
+                        !selected_mask[index]) {
+                        selected_mask[index] = true;
+                        selected_indices.push_back(index);
+                        ++already_selected;
+                        ++safeguard_count;
+                    }
+                }
+            }
+            RecordTabuRlNeighborhoodSafeguards(safeguard_count);
+
+            for (const std::size_t index : selected_indices) {
+                if (index >= candidates.size() || !evaluator.CanContinue()) {
+                    break;
+                }
+                evaluator.Consider(
+                    std::move(candidates[index].schedule_items),
+                    candidates[index].move
+                );
+            }
+            selection = evaluator.Select();
+            const bool missing_candidate = !selection.candidate.has_value();
+            const bool non_improving_candidate =
+                selection.candidate.has_value() &&
+                selection.candidate->schedule.get_TotalTime() >=
+                    current_schedule.get_TotalTime();
+            const bool verify_full_neighborhood =
+                GetTabuRlRuntimeConfig().verify_full_neighborhood;
+            const bool should_fallback = evaluator.CanContinue() && (
+                verify_full_neighborhood ||
+                (missing_candidate &&
+                 GetTabuRlRuntimeConfig().fallback_on_miss) ||
+                (non_improving_candidate &&
+                 GetTabuRlRuntimeConfig().fallback_on_non_improvement)
+            );
+            if (should_fallback) {
+                if (verify_full_neighborhood) {
+                    RecordTabuRlVerification();
+                } else if (missing_candidate) {
+                    RecordTabuRlFallback();
+                } else {
+                    RecordTabuRlNonImprovementFallback();
+                }
+                for (std::size_t index = 0;
+                     index < candidates.size() && evaluator.CanContinue();
+                     ++index) {
+                    if (selected_mask[index]) {
+                        continue;
+                    }
+                    evaluator.Consider(
+                        std::move(candidates[index].schedule_items),
+                        candidates[index].move
+                    );
+                }
+                selection = evaluator.Select();
+            }
         }
 
-        SelectionResult selection = evaluator.Select();
         if (!selection.candidate.has_value()) {
             break;
         }
@@ -1432,7 +1880,10 @@ Schedule TabuSearch(
             iteration + 1 < max_iter_count) {
             current_schedule = global_best_schedule;
             tabu_expiration.clear();
-            perturbation_steps_remaining = RandomInteger(2, 5);
+            perturbation_steps_remaining = RandomInteger(
+                perturbation_min,
+                perturbation_max
+            );
             stagnation_count = 0;
         }
     }

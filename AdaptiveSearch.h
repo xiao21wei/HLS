@@ -51,6 +51,7 @@ public:
     void ScheduleIntensification();
     int SelectArchiveIndex(int archive_size);
     const SearchMethodStats &GetStats(SearchMethod method) const;
+    double GetScoreBonus(SearchMethod method) const;
 
 private:
     static int MethodIndex(SearchMethod method);
@@ -64,6 +65,7 @@ private:
     );
 
     std::array<double, 4> initial_preferences_{};
+    std::array<double, 4> score_bonuses_{};
     std::array<SearchMethodStats, 4> statistics_{};
     std::deque<SearchDecision> pending_intensification_;
     std::mt19937 random_engine_;

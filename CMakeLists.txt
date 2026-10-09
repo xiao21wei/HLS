@@ -25,12 +25,16 @@ add_executable(production_scheduling main.cpp
         DataProc.h
         GreedySearch.cpp
         GreedySearch.h
+        GreedyRlPolicy.cpp
+        GreedyRlPolicy.h
         GuidedSearch.cpp
         GuidedSearch.h
         RandomSearch.cpp
         RandomSearch.h
         TabuSearch.cpp
         TabuSearch.h
+        TabuRlPolicy.cpp
+        TabuRlPolicy.h
         Experiment.cpp
         Experiment.h
         CoptInitialSolution.cpp

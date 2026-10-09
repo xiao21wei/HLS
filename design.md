@@ -1,6 +1,6 @@
 # HLS-FJSP 设计说明
 
-本文以当前 `main.cpp`、`DataProc.cpp`、`CoptInitialSolution.cpp`、`GreedySearch.cpp`、`RandomSearch.cpp`、`TabuSearch.cpp`、`GuidedSearch.cpp` 和 `AdaptiveSearch.cpp` 的**实际实现**为准。主程序先构造完整可行解，再交替调用贪心、遗传、禁忌及可选的引导式跨机插入搜索；始终单独保留全局最小 makespan。
+本文以当前 `main.cpp`、`DataProc.cpp`、`CoptInitialSolution.cpp`、`GreedySearch.cpp`、`GreedyRlPolicy.cpp`、`RandomSearch.cpp`、`TabuSearch.cpp`、`GuidedSearch.cpp` 和 `AdaptiveSearch.cpp` 的**实际实现**为准。主程序先构造完整可行解，再交替调用贪心、遗传、禁忌及可选的引导式跨机插入搜索；Greedy 可选用 HLS 自主训练的 PPO Actor 筛选邻域动作；程序始终单独保留全局最小 makespan。
 
 本文只描述已经运行的 HLS 代码。`l2s-design.md` 第一阶段的规则候选排序、多轨迹和轻量访问记忆已以第四方法接入；head/tail 安全预筛、公共候选引擎和学习模型仍未实现。
 
@@ -181,7 +181,7 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 - 外层搜索次数超过 `1200`；
 - 所有当前启用的方法在某段连续搜索中都至少失败过一次时，累计一个“无全局改进完整轮”；Guided 被关闭时预先视为完成该轮，不改变原三方法停止语义。任一方法刷新全局最好值就重置全部停滞状态。
 
-自适应调度器、遗传、禁忌和 Guided 分别使用由命令行 `random_seed` 异或不同常量派生的随机流。遗传种群、代数、停滞计数和适应度缓存会在同一进程/实例的多次调用之间保留；禁忌搜索会保留当前非最优轨迹、短期禁忌属性、绝对迭代号和移动频率；Guided 会保留多条轨迹、近期调度签名和动作访问频率。跨实例时由问题签名重置这些内部状态。批量脚本每次调用单独启动可执行文件，因此**不同运行之间不共享**搜索统计或解的记忆。
+自适应调度器、遗传、禁忌、Guided 和 Greedy RL 候选采样分别使用由命令行 `random_seed` 异或不同常量派生的随机流。遗传种群、代数、停滞计数和适应度缓存会在同一进程/实例的多次调用之间保留；禁忌搜索会保留当前非最优轨迹、短期禁忌属性、绝对迭代号和移动频率；Guided 会保留多条轨迹、近期调度签名和动作访问频率。Greedy RL 的模型权重在进程启动时读取一次，运行中不在线更新。跨实例时由问题签名重置搜索状态。批量脚本每次调用单独启动可执行文件，因此**不同运行之间不共享**搜索统计或解的记忆。
 
 ## 6. 贪心局部搜索
 
@@ -214,6 +214,16 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 ### 6.4 搜索规模控制
 
 一次下降迭代最多提交 600 个零松弛同机重插入候选、1800 个零松弛跨机迁移候选；近关键补充阶段最多 180 个同机候选和 480 个跨机候选。若仍无严格 makespan 改进，再从关键工序对中尝试同机双工序交换，预算最多 240 次（计数发生在同机检查之前，可能包含不适用的工序对）。所有阶段都受单次截止时间限制，任一候选成环则继续寻找其他候选。接受等 makespan 的更优结构最多连续 4 次；出现严格 makespan 改进即清零该计数。
+
+### 6.5 可选的 PPO 邻域筛选
+
+设置 `HLS_GREEDY_RL=1` 且成功加载模型后，Greedy 的候选生成规则保持不变，但不再立即对全部动作重建调度图。零松弛阶段先把同机重插入和跨机插入合并为一个轻量动作集合；近关键阶段使用相同流程；前两阶段均无改善时，策略再筛选同机交换动作。动作只保存移动类型、源/目标机器、源/目标位置和特征，尚未成为完整候选调度。
+
+Actor 输入为 16 维归一化特征：三类动作 one-hot、是否零松弛、slack、源/目标加工时间及差值、源/目标机器负载及差值、源/目标位置、位置距离和源/目标序列长度。当前网络为 `16 -> tanh(hidden) -> 1`，默认隐藏层宽度 32。C++ 读取 `HLS_GREEDY_RL_V1` 文本权重并原生计算动作分数，不依赖 Python、PyTorch、ONNX Runtime 或 GPU。
+
+候选基数由 `HLS_GREEDY_RL_TOP_K` 给定，默认 96；动态 Top-K 默认开启：工序数少于 80 时保持基数，80～159 扩展到至少 192，160～199 扩展到至少 256，200 及以上扩展到至少 384。候选池默认由模型高分动作、25% 原 Greedy 规则高分动作和 15% `softmax(score / temperature)` 无放回探索动作组成，重复动作去重后再补足目标数量。只有被选中的动作才复制机器序列、调用 `ScheduleItemsToGraph()` 并计算真实 makespan。Greedy 仍按 `ScheduleQuality` 从精确结果中取 best-improvement，模型分数不能直接更新工作解。默认开启 miss fallback：RL 的关键、近关键和交换阶段均未找到可接受解时，补跑一次第 6.1～6.4 节的原始 Greedy 步骤，避免因漏召回而提前终止；这会牺牲局部最优附近的一部分加速收益。模型缺失、版本不匹配或权重非法时，启动日志将 `greedy_rl_enabled` 置为 false，并完整回退原始搜索。
+
+`rl_greedy/` 在 HLS 仓库内独立实现 `.fjs` 解析、调度图、动作环境、PPO Actor-Critic、训练、测试和文本模型导出，不导入或复制 L2S 仓库内容。合成器默认覆盖每工件 3～15 道工序、每道工序最多 6 台候选机器和 1～20 加工时间，以匹配 Brandimarte 的结构范围，同时保留 Mk01～Mk10 为最终测试集。每个训练状态先精确评价完整动作集合，以真实相对 makespan 收益进行 listwise 排序训练和 hard-negative margin 约束；再用局部收益、incumbent 收益及非改善惩罚执行 PPO 多步微调。排序样本按 80%/20% 拆分，日志在未参与当轮排序更新的样本上报告 Recall@96、ImprovementRecall@96、Regret@96 和真实最优动作中位排名。成环动作保留在策略动作集中，被选中时得到额外惩罚且不改变当前解，以匹配 C++ 先筛选、后精确验证的执行顺序。Python 评价器从同一初始解比较全邻域 Greedy 与混合 Top-K Greedy，同时报告 makespan、精确评价数量、最优动作召回、改善动作召回、regret、可行率和纯模型最优动作排名。正式模型测试对 Mk01～Mk10 各执行一次，结果写入 `rl_greedy/results/<运行时间>/result.csv`，其中包含实例 seed、模型路径与 SHA-256、筛选参数和上述指标。
 
 ## 7. 遗传、禁忌与引导式搜索
 
@@ -278,6 +288,8 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 
 `tabu_list_length` 是禁忌期限配置值。令 `size_tenure = max(7, round(sqrt(工序数)))`，中心 `center = max(5, (tabu_list_length + size_tenure) / 2)`，下界为 `max(3, center * 2 / 3)`，上界为 `max(下界, center * 4 / 3)`；方法内部停滞至少 5 次时上界再增加 `max(1, size_tenure / 2)`。实际期限在此区间随机抽取，原逆移动属性在 `absolute_iteration + tenure + 1` 到期。配置值不大于 0 时不注册逆移动禁忌。单次调用的内部重启阈值 `max(8, min(40, max(1, max_iter_count / 3)))`，在还有迭代次数时回到本次方法最好解，清空短期禁忌表，并执行 2～5 步扰动。每次实际选定的移动更新访问频率和当前轨迹；到绝对迭代数跨过 300 的倍数时将频率减半、去掉归零的记录。绝对迭代数与禁忌到期时间跨外层调用连续递增。
 
+Tabu 可通过 `HLS_TABU_RL=1` 暂时复用当前 Greedy Actor。五类邻域仍按原顺序生成，但先保存机器序列、移动属性和与 Greedy 一致的 16 维特征，在完整图评价前做混合筛选。候选基数默认 256；工序数达到 80/160/200 时分别扩展到至少 384/512/768。候选池默认由 50% 模型动作、30% 原规则动作和 20% 探索动作组成，并为每类非空邻域额外保证最多 16 个候选。筛选后仍执行原 `NeighborEvaluator` 的精确 makespan、禁忌、aspiration、频率和变差阈值逻辑；没有任何可接受候选时再评价未入选候选。当前模型没有针对 Tabu 多步变差收益训练，因此该功能默认关闭，属于效果待验证的复用方案。
+
 ### 7.3 Guided Insertion
 
 `GuidedInsertionSearch` 是不依赖学习模型的 L2S 风格第一版。完整动作记录 `(job_id, process_id, source_machine, target_machine, target_position, source_schedule_signature)`；只有源调度签名仍一致时才应用，防止旧槽位作用到已变化的调度。动作仅跨机迁移，同机重排继续由 Greedy/Tabu 负责。
@@ -292,7 +304,7 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 
 ### 7.4 与 L2S 的关系
 
-当前 Guided 借鉴的是 L2S 的**局部搜索框架**，没有移植其强化学习模型。二者都从已经包含全部工序的完整调度出发，围绕关键工序构造跨机器插入动作；每一步先提出多个动作，再计算候选调度的 makespan，执行其中较好的动作，并把当前轨迹与历史最好解分开维护。对应关系如下：
+当前 Guided 借鉴的是 L2S 的**局部搜索框架**，没有移植其强化学习模型。二者都从已经包含全部工序的完整调度出发，围绕关键工序构造跨机器插入动作；每一步先提出多个动作，再计算候选调度的 makespan，执行其中较好的动作，并把当前轨迹与历史最好解分开维护。第 6.5 节的 Greedy PPO 也是 HLS 内重新实现的独立模块，不使用 L2S 代码或权重。对应关系如下：
 
 | L2S 设计 | 当前 HLS 实现 | HLS 的改造或差异 |
 | --- | --- | --- |
@@ -309,7 +321,7 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 
 ## 8. 可行性与评价闭环
 
-所有搜索分支的实际可行性和 makespan 都回到同一张调度图；Greedy 与 Tabu 对单个候选典型执行以下闭环：
+所有搜索分支的实际可行性和 makespan 都回到同一张调度图；Greedy RL 只在第一步对动作排序，不改变后续确定性闭环。Greedy 与 Tabu 对单个被选候选典型执行以下流程：
 
 ```text
 改变机器选择或机器顺序
@@ -345,6 +357,36 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 | `random_seed` | 当前 Unix 时间（秒） | 调度器、遗传、禁忌及启发式多起点的根随机种子 |
 
 非位置参数环境变量 `HLS_ENABLE_GUIDED_SEARCH` 控制第四方法。程序启动时输出 `guided_search_enabled` 和 `operation_count`，用于确认规模门槛和环境变量最终选择的执行路径。
+
+Greedy PPO 邻域筛选使用以下全局环境变量：
+
+| 环境变量 | 默认值 | 作用 |
+| --- | ---: | --- |
+| `HLS_GREEDY_RL` | `0` | 请求启用 Greedy RL；默认保持原始 Greedy |
+| `HLS_GREEDY_RL_MODEL` | `rl_greedy/models/greedy_policy.txt` | C++ Actor 文本权重路径 |
+| `HLS_GREEDY_RL_TOP_K` | `96` | 动态扩展前的候选基数 |
+| `HLS_GREEDY_RL_DYNAMIC_TOP_K` | `1` | 按工序数自动扩展到至少 96/192/256/384 |
+| `HLS_GREEDY_RL_RULE_FRACTION` | `0.25` | 候选池中由原 Greedy 规则保底的比例 |
+| `HLS_GREEDY_RL_FALLBACK_ON_MISS` | `1` | RL 三阶段无可接受解时补跑原始 Greedy 步骤 |
+| `HLS_GREEDY_RL_TEMPERATURE` | `1.0` | 探索采样 softmax 温度，限制为 0.05～20 |
+| `HLS_GREEDY_RL_EXPLORATION` | `0.15` | Top-K 中概率采样席位比例，限制为 0～0.5 |
+
+启动日志输出 `greedy_rl_requested`、`greedy_rl_enabled`、模型路径和加载状态；运行结束时 `Greedy RL summary` 汇总策略调用、生成动作和入选动作数量。批量脚本直接继承这些环境变量，无需增加位置参数。
+
+Tabu 模型复用使用独立环境变量：
+
+| 环境变量 | 默认值 | 作用 |
+| --- | ---: | --- |
+| `HLS_TABU_RL` | `0` | 是否启用 Tabu RL 筛选 |
+| `HLS_TABU_RL_MODEL` | 继承 Greedy 模型路径 | 当前复用的 Actor 权重 |
+| `HLS_TABU_RL_TOP_K` | `256` | 动态扩展前的候选基数 |
+| `HLS_TABU_RL_DYNAMIC_TOP_K` | `1` | 按工序数扩展到至少 256/384/512/768 |
+| `HLS_TABU_RL_RULE_FRACTION` | `0.30` | 原 Tabu 规则候选比例 |
+| `HLS_TABU_RL_EXPLORATION` | `0.20` | 概率探索比例 |
+| `HLS_TABU_RL_MIN_PER_NEIGHBORHOOD` | `16` | 五类非空邻域各自最低保留数 |
+| `HLS_TABU_RL_FALLBACK_ON_MISS` | `1` | 无可接受候选时评价未入选动作 |
+
+启动日志和 `Tabu RL summary` 分别记录模型状态，以及生成/选择候选、各来源候选、邻域配额补充和 fallback 次数。
 
 命令行位置参数依次为：
 
@@ -382,6 +424,8 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 
 最新完整实验位于 `run_logs/20260922_122032/`：Mk01～Mk10 各运行 10 次，每次 COPT 上限 300 秒、COPT 加 HLS 总时限 3600 秒。L2S 数据取自 `/home/luopw24/L2S-FJSP/result.csv` 的对应十次结果。表中差值为 `HLS 均值 - L2S 均值`，负值表示 HLS 更好。
 
+该轮实验早于 Greedy PPO 模块，使用的是 `HLS_GREEDY_RL=0` 等价路径，不能用于评价新策略。当前仅完成小规模训练、导出、加载和搜索闭环验证；正式效果需要训练独立模型后，以相同 seed、COPT 起点和总时限进行 RL 开/关配对实验。
+
 | 实例 | HLS 最好 | HLS 均值 | HLS 最差 | L2S 最好 | L2S 均值 | L2S 最差 | 均值差 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Mk01 | 40 | 40.0 | 40 | 40 | 40.9 | 42 | -0.9 |
@@ -408,3 +452,5 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 5. 当前 Greedy/Tabu 的候选多次复制调度并重建稠密图，尚无增量 makespan、统一的跨方法候选缓存或并行单实例搜索；批量脚本的并行是**不同进程/实验之间**的并行。
 6. 精英库仅按签名去重且按加入顺序淘汰旧项；外层接纳等 makespan 工作解时只检查与现有工作解签名不同，**不**再次比较 Greedy 的结构次目标。遗传的结构距离筛选只用于种群，外层库没有基于距离的全局维护策略。
 7. `Guided Insertion` 已实现规则候选排序、多轨迹和轻量访问记忆，但尚未与 Greedy/Tabu 提取统一公共候选引擎，也没有 L2S 的 head/tail 安全预筛、近邻向量检索和学习模型。未经同实例、同总时限、同并发和同随机种子的实验，不应把其他仓库的 makespan 与 HLS 结果直接归因于某个邻域机制。
+8. Greedy PPO 当前使用手工动作特征和小型 MLP，尚未编码完整调度图；监督排序、规则保底和动态 Top-K 用于降低召回损失，但仍需重新训练并在 Mk01～Mk10 上验证是否优于原始 Greedy。模型训练和比较必须计入训练数据隔离以及总时间预算。
+9. Tabu RL 当前直接复用 Greedy Actor，只能视为候选提议器；模型训练目标没有覆盖禁忌期限、aspiration 和受控变差的长期回报。正式默认启用前应训练独立 Tabu 模型，并做原始 Tabu、模型筛选和规则保底的消融实验。
