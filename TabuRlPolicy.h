@@ -33,6 +33,7 @@ struct TabuRlStats {
     long long neighborhood_safeguards = 0;
     long long fallback_calls = 0;
     long long non_improvement_fallback_calls = 0;
+    long long intensification_expansion_calls = 0;
     long long verification_calls = 0;
 };
 
@@ -49,6 +50,8 @@ void RecordTabuRlNeighborhoodSafeguards(long long count);
 void RecordTabuRlFallback();
 
 void RecordTabuRlNonImprovementFallback();
+
+void RecordTabuRlIntensificationExpansion();
 
 void RecordTabuRlVerification();
 

@@ -28,7 +28,7 @@ using namespace std;
 
 namespace {
 
-constexpr int kMaximumOuterCalls = 1200;
+constexpr int kMaximumOuterCalls = 100000;
 constexpr int kMaximumEliteArchiveSize = 8;
 
 bool GuidedSearchRequested() {
@@ -663,6 +663,8 @@ int main(int argc, char *argv[]) {
              << ", fallback_calls=" << rl_stats.fallback_calls
              << ", non_improvement_fallback_calls="
              << rl_stats.non_improvement_fallback_calls
+             << ", intensification_expansion_calls="
+             << rl_stats.intensification_expansion_calls
              << ", verification_calls=" << rl_stats.verification_calls
              << endl;
     }

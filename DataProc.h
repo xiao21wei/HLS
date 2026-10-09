@@ -4,6 +4,8 @@
 
 #ifndef DATAPROC_H
 #define DATAPROC_H
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "Job.h"
@@ -30,6 +32,35 @@ int GetProcessTime(const std::vector<Job> &jobs, const int machine_id, const int
 
 // 将调度方案转换为邻接矩阵
 std::vector<std::vector<int>> ScheduleItemsToGraph(Schedule &schedule, std::vector<Schedule_item> &schedule_items, const std::vector<Job> &jobs, const std::vector<std::string> &jobList, bool flag, std::vector<Machine> &machines);
+
+class ScheduleItemsMakespanEvaluator {
+public:
+    ScheduleItemsMakespanEvaluator(
+        const std::vector<Job> &jobs,
+        const std::vector<std::string> &jobList
+    );
+
+    bool Evaluate(
+        const std::vector<Schedule_item> &schedule_items,
+        int &makespan
+    ) const;
+
+private:
+    int operation_count_ = 0;
+    bool valid_ = true;
+    std::unordered_map<long long, int> process_indices_;
+    std::unordered_map<long long, int> process_times_;
+    std::vector<std::pair<int, int>> job_arcs_;
+};
+
+// Evaluate the same job/machine DAG without materializing its dense matrix.
+// Returns false when the candidate contains a cycle.
+bool TryCalculateScheduleItemsMakespan(
+    const std::vector<Schedule_item> &schedule_items,
+    const std::vector<Job> &jobs,
+    const std::vector<std::string> &jobList,
+    int &makespan
+);
 
 // 计算调度方案的总时间开销
 int CalculateTotalTime(Schedule &schedule);

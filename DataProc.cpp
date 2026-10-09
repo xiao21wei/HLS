@@ -6,12 +6,14 @@
 #include "Schedule.h"
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <queue>
 #include <unordered_map>
+#include <utility>
 
 namespace {
 
@@ -432,6 +434,183 @@ std::vector<std::vector<int>> ScheduleItemsToGraph(Schedule &schedule, std::vect
         CalculateTotalFailureRate(schedule, machines);
     }
     return graph;
+}
+
+ScheduleItemsMakespanEvaluator::ScheduleItemsMakespanEvaluator(
+    const std::vector<Job> &jobs,
+    const std::vector<std::string> &jobList
+) {
+    const auto job_name_map = BuildJobNameMap(jobs);
+    process_times_ = BuildProcessTimeMap(jobs);
+    for (const auto &job_name : jobList) {
+        const auto job_it = job_name_map.find(
+            job_name.substr(0, job_name.find('-'))
+        );
+        if (job_it == job_name_map.end()) {
+            valid_ = false;
+            continue;
+        }
+        const Job &job = *job_it->second;
+        for (int process_id = 0;
+             process_id < job.get_process_count();
+             ++process_id) {
+            const long long identifier =
+                (static_cast<long long>(job.get_job_id()) << 32) ^
+                static_cast<unsigned int>(process_id);
+            if (!process_indices_.emplace(
+                    identifier,
+                    operation_count_
+                ).second) {
+                valid_ = false;
+                continue;
+            }
+            ++operation_count_;
+        }
+    }
+    job_arcs_.reserve(operation_count_);
+    for (const auto &job_name : jobList) {
+        const auto job_it = job_name_map.find(
+            job_name.substr(0, job_name.find('-'))
+        );
+        if (job_it == job_name_map.end()) {
+            continue;
+        }
+        const Job &job = *job_it->second;
+        for (int process_id = 0;
+             process_id + 1 < job.get_process_count();
+             ++process_id) {
+            const long long current_identifier =
+                (static_cast<long long>(job.get_job_id()) << 32) ^
+                static_cast<unsigned int>(process_id);
+            const long long next_identifier =
+                (static_cast<long long>(job.get_job_id()) << 32) ^
+                static_cast<unsigned int>(process_id + 1);
+            const auto current_it = process_indices_.find(current_identifier);
+            const auto next_it = process_indices_.find(next_identifier);
+            if (current_it == process_indices_.end() ||
+                next_it == process_indices_.end()) {
+                valid_ = false;
+                continue;
+            }
+            job_arcs_.emplace_back(current_it->second, next_it->second);
+        }
+    }
+}
+
+bool ScheduleItemsMakespanEvaluator::Evaluate(
+    const std::vector<Schedule_item> &schedule_items,
+    int &makespan
+) const {
+    if (!valid_) {
+        return false;
+    }
+    if (operation_count_ == 0) {
+        makespan = 0;
+        return true;
+    }
+
+    std::vector<std::array<int, 2>> successors(
+        operation_count_,
+        std::array<int, 2>{-1, -1}
+    );
+    std::vector<int> successor_count(operation_count_, 0);
+    std::vector<int> in_degree(operation_count_, 0);
+    std::vector<int> processing_time(operation_count_, -1);
+    std::vector<bool> seen(operation_count_, false);
+
+    auto add_edge = [&](const int from, const int to) {
+        for (int index = 0; index < successor_count[from]; ++index) {
+            if (successors[from][index] == to) {
+                return true;
+            }
+        }
+        if (successor_count[from] >= 2) {
+            return false;
+        }
+        successors[from][successor_count[from]++] = to;
+        ++in_degree[to];
+        return true;
+    };
+
+    int scheduled_count = 0;
+    for (const auto &schedule_item : schedule_items) {
+        int previous_index = -1;
+        for (const auto &process : schedule_item.schedule_process) {
+            const long long identifier =
+                (static_cast<long long>(process.job_id) << 32) ^
+                static_cast<unsigned int>(process.process_id);
+            const auto index_it = process_indices_.find(identifier);
+            const auto time_it = process_times_.find(BuildProcessTimeKey(
+                process.job_id,
+                process.process_id,
+                schedule_item.machine_id
+            ));
+            if (index_it == process_indices_.end() ||
+                time_it == process_times_.end() ||
+                seen[index_it->second]) {
+                return false;
+            }
+            const int current_index = index_it->second;
+            seen[current_index] = true;
+            processing_time[current_index] = time_it->second;
+            ++scheduled_count;
+            if (previous_index >= 0 &&
+                !add_edge(previous_index, current_index)) {
+                return false;
+            }
+            previous_index = current_index;
+        }
+    }
+    if (scheduled_count != operation_count_) {
+        return false;
+    }
+    for (const auto &[from, to] : job_arcs_) {
+        if (!add_edge(from, to)) {
+            return false;
+        }
+    }
+
+    std::queue<int> ready;
+    for (int node = 0; node < operation_count_; ++node) {
+        if (in_degree[node] == 0) {
+            ready.push(node);
+        }
+    }
+    std::vector<int> start_time(operation_count_, 0);
+    int visited_count = 0;
+    makespan = 0;
+    while (!ready.empty()) {
+        const int current = ready.front();
+        ready.pop();
+        ++visited_count;
+        makespan = std::max(
+            makespan,
+            start_time[current] + processing_time[current]
+        );
+        for (int index = 0; index < successor_count[current]; ++index) {
+            const int next = successors[current][index];
+            start_time[next] = std::max(
+                start_time[next],
+                start_time[current] + processing_time[current]
+            );
+            if (--in_degree[next] == 0) {
+                ready.push(next);
+            }
+        }
+    }
+    return visited_count == operation_count_;
+}
+
+bool TryCalculateScheduleItemsMakespan(
+    const std::vector<Schedule_item> &schedule_items,
+    const std::vector<Job> &jobs,
+    const std::vector<std::string> &jobList,
+    int &makespan
+) {
+    return ScheduleItemsMakespanEvaluator(jobs, jobList).Evaluate(
+        schedule_items,
+        makespan
+    );
 }
 
 int CalculateTotalFailureRate(Schedule &schedule, const std::vector<Machine> &machines){

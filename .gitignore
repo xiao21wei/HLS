@@ -24,6 +24,7 @@
 /rl_greedy/models/*
 !/rl_greedy/models/.gitkeep
 /rl_greedy/results/
+/codex_runs/
 
 # External benchmark mirrors not required by the default Mk01-Mk10 workflow
 /datasets/Kacem_Data/

@@ -61,6 +61,15 @@ int EnvironmentInteger(
     }
 }
 
+bool SparseEvaluatorVerificationEnabled() {
+    static const bool enabled = [] {
+        const char *value = std::getenv("HLS_VERIFY_SPARSE_EVALUATOR");
+        return value != nullptr && std::string(value) != "0" &&
+               std::string(value) != "false";
+    }();
+    return enabled;
+}
+
 long long BuildProcessId(const int job_id, const int process_id) {
     return (static_cast<long long>(job_id) << 32) ^
            static_cast<unsigned int>(process_id);
@@ -139,14 +148,16 @@ constexpr int kTabuNeighborhoodTypeCount = 5;
 struct TabuRlUnevaluatedCandidate {
     std::vector<Schedule_item> schedule_items;
     MoveAttribute move;
+    std::string signature;
     GreedyRlFeatures features{};
     TabuNeighborhoodType neighborhood = TabuNeighborhoodType::SequenceMove;
 };
 
 struct CandidateRecord {
-    Schedule schedule;
+    std::vector<Schedule_item> schedule_items;
     MoveAttribute move;
     std::string signature;
+    int makespan = 0;
     double selection_score = 0.0;
 };
 
@@ -681,8 +692,8 @@ bool IsBetterCandidate(
     if (left.selection_score != right.selection_score) {
         return left.selection_score < right.selection_score;
     }
-    if (left.schedule.get_TotalTime() != right.schedule.get_TotalTime()) {
-        return left.schedule.get_TotalTime() < right.schedule.get_TotalTime();
+    if (left.makespan != right.makespan) {
+        return left.makespan < right.makespan;
     }
     return left.signature < right.signature;
 }
@@ -705,6 +716,7 @@ public:
     ) : base_schedule_(base_schedule),
         jobs_(jobs),
         job_list_(job_list),
+        sparse_evaluator_(jobs, job_list),
         machines_(machines),
         tabu_expiration_(tabu_expiration),
         move_frequency_(move_frequency),
@@ -720,28 +732,43 @@ public:
 
     bool Consider(
         std::vector<Schedule_item> &&schedule_items,
-        const MoveAttribute &move
+        const MoveAttribute &move,
+        std::string signature = {}
     ) {
         if (!CanContinue()) {
             return false;
         }
 
-        std::string signature = BuildScheduleSignature(schedule_items);
+        if (signature.empty()) {
+            signature = BuildScheduleSignature(schedule_items);
+        }
         if (!seen_signatures_.insert(signature).second) {
             return true;
         }
         ++evaluated_count_;
 
-        Schedule candidate;
-        if (!EvaluateCandidate(
-                base_schedule_,
-                std::move(schedule_items),
-                jobs_,
-                job_list_,
-                machines_,
-                candidate
+        int candidate_makespan = 0;
+        if (!sparse_evaluator_.Evaluate(
+                schedule_items,
+                candidate_makespan
             )) {
             return CanContinue();
+        }
+        if (SparseEvaluatorVerificationEnabled()) {
+            Schedule dense_candidate;
+            if (!EvaluateCandidate(
+                    base_schedule_,
+                    schedule_items,
+                    jobs_,
+                    job_list_,
+                    machines_,
+                    dense_candidate
+                ) ||
+                dense_candidate.get_TotalTime() != candidate_makespan) {
+                throw std::runtime_error(
+                    "sparse Tabu evaluator disagrees with dense evaluator"
+                );
+            }
         }
 
         const std::string frequency_key = BuildFrequencyKey(move);
@@ -753,24 +780,24 @@ public:
             ? std::max(0.1, global_best_makespan_ * 0.0005)
             : 0.0;
         CandidateRecord record{
-            std::move(candidate),
+            std::move(schedule_items),
             move,
             std::move(signature),
+            candidate_makespan,
             0.0
         };
-        record.selection_score = record.schedule.get_TotalTime() +
+        record.selection_score = record.makespan +
                                  diversity_weight * frequency;
 
-        const bool aspiration =
-            record.schedule.get_TotalTime() < global_best_makespan_;
+        const bool aspiration = record.makespan < global_best_makespan_;
         if (!aspiration &&
-            record.schedule.get_TotalTime() >
+            record.makespan >
                 base_schedule_.get_TotalTime() + max_deterioration_) {
             return CanContinue();
         }
         if (!best_any_.has_value() ||
-            record.schedule.get_TotalTime() < best_any_->schedule.get_TotalTime() ||
-            (record.schedule.get_TotalTime() == best_any_->schedule.get_TotalTime() &&
+            record.makespan < best_any_->makespan ||
+            (record.makespan == best_any_->makespan &&
              record.signature < best_any_->signature)) {
             best_any_ = record;
         }
@@ -824,6 +851,7 @@ private:
     const Schedule &base_schedule_;
     const std::vector<Job> &jobs_;
     const std::vector<std::string> &job_list_;
+    ScheduleItemsMakespanEvaluator sparse_evaluator_;
     std::vector<Machine> &machines_;
     const std::unordered_map<std::string, int> &tabu_expiration_;
     const std::unordered_map<std::string, int> &move_frequency_;
@@ -876,7 +904,7 @@ public:
         if (!CanContinue()) {
             return false;
         }
-        const std::string signature = BuildScheduleSignature(schedule_items);
+        std::string signature = BuildScheduleSignature(schedule_items);
         if (!seen_signatures_.insert(signature).second) {
             return true;
         }
@@ -888,6 +916,7 @@ public:
         candidates_.push_back({
             std::move(schedule_items),
             move,
+            std::move(signature),
             features,
             neighborhood
         });
@@ -920,15 +949,10 @@ private:
         const auto source_location_it = original_locations_.find(
             move.process_identifier
         );
-        const auto candidate_locations = BuildProcessLocationMap(candidate_items);
-        const auto target_location_it = candidate_locations.find(
-            move.process_identifier
-        );
         if (job_it == job_ids_.end() ||
             source_machine_it == machine_indices_.end() ||
             target_machine_it == machine_indices_.end() ||
-            source_location_it == original_locations_.end() ||
-            target_location_it == candidate_locations.end()) {
+            source_location_it == original_locations_.end()) {
             return features;
         }
         const Job_process *job_process = FindJobProcess(
@@ -941,6 +965,39 @@ private:
 
         const int source_machine_index = source_machine_it->second;
         const int target_machine_index = target_machine_it->second;
+        const auto &target_processes =
+            candidate_items[target_machine_index].schedule_process;
+        int target_position = -1;
+        for (int position = 0;
+             position < static_cast<int>(target_processes.size());
+             ++position) {
+            const auto &candidate_process = target_processes[position];
+            if (BuildProcessId(
+                    candidate_process.job_id,
+                    candidate_process.process_id
+                ) == move.process_identifier) {
+                target_position = position;
+                break;
+            }
+        }
+        if (target_position < 0) {
+            return features;
+        }
+        if (SparseEvaluatorVerificationEnabled()) {
+            const auto candidate_locations =
+                BuildProcessLocationMap(candidate_items);
+            const auto target_location_it = candidate_locations.find(
+                move.process_identifier
+            );
+            if (target_location_it == candidate_locations.end() ||
+                target_location_it->second.machine_index !=
+                    target_machine_index ||
+                target_location_it->second.item_index != target_position) {
+                throw std::runtime_error(
+                    "optimized Tabu target lookup disagrees with full map"
+                );
+            }
+        }
         const int source_length = static_cast<int>(
             original_items_[source_machine_index].schedule_process.size()
         );
@@ -1010,12 +1067,12 @@ private:
             source_length - 1
         );
         features[12] = BoundedRlRatio(
-            target_location_it->second.item_index,
+            target_position,
             target_length
         );
         features[13] = BoundedRlRatio(
             std::abs(
-                target_location_it->second.item_index -
+                target_position -
                 source_location_it->second.item_index
             ),
             std::max(source_length, target_length)
@@ -1799,19 +1856,25 @@ Schedule TabuSearch(
                 }
                 evaluator.Consider(
                     std::move(candidates[index].schedule_items),
-                    candidates[index].move
+                    candidates[index].move,
+                    std::move(candidates[index].signature)
                 );
             }
             selection = evaluator.Select();
             const bool missing_candidate = !selection.candidate.has_value();
             const bool non_improving_candidate =
                 selection.candidate.has_value() &&
-                selection.candidate->schedule.get_TotalTime() >=
+                selection.candidate->makespan >=
                     current_schedule.get_TotalTime();
+            const bool missed_global_improvement =
+                selection.candidate.has_value() &&
+                selection.candidate->makespan >= global_best_makespan &&
+                selected_indices.size() < candidates.size();
             const bool verify_full_neighborhood =
                 GetTabuRlRuntimeConfig().verify_full_neighborhood;
             const bool should_fallback = evaluator.CanContinue() && (
                 verify_full_neighborhood ||
+                missed_global_improvement ||
                 (missing_candidate &&
                  GetTabuRlRuntimeConfig().fallback_on_miss) ||
                 (non_improving_candidate &&
@@ -1822,6 +1885,8 @@ Schedule TabuSearch(
                     RecordTabuRlVerification();
                 } else if (missing_candidate) {
                     RecordTabuRlFallback();
+                } else if (missed_global_improvement) {
+                    RecordTabuRlIntensificationExpansion();
                 } else {
                     RecordTabuRlNonImprovementFallback();
                 }
@@ -1833,7 +1898,8 @@ Schedule TabuSearch(
                     }
                     evaluator.Consider(
                         std::move(candidates[index].schedule_items),
-                        candidates[index].move
+                        candidates[index].move,
+                        std::move(candidates[index].signature)
                     );
                 }
                 selection = evaluator.Select();
@@ -1848,6 +1914,20 @@ Schedule TabuSearch(
         }
 
         CandidateRecord selected = std::move(*selection.candidate);
+        Schedule selected_schedule;
+        if (!EvaluateCandidate(
+                current_schedule,
+                std::move(selected.schedule_items),
+                jobs,
+                jobList,
+                machines,
+                selected_schedule
+            ) ||
+            selected_schedule.get_TotalTime() != selected.makespan) {
+            throw std::runtime_error(
+                "selected Tabu candidate disagrees with sparse evaluation"
+            );
+        }
         const int tenure = GenerateTabuTenure(
             tabu_list_length,
             operation_count,
@@ -1861,7 +1941,7 @@ Schedule TabuSearch(
             );
         }
         ++move_frequency[BuildFrequencyKey(selected.move)];
-        current_schedule = std::move(selected.schedule);
+        current_schedule = std::move(selected_schedule);
         ++iterations_completed;
 
         if (current_schedule.get_TotalTime() < global_best_makespan) {

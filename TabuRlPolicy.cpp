@@ -283,6 +283,10 @@ void RecordTabuRlNonImprovementFallback() {
     ++MutableStats().non_improvement_fallback_calls;
 }
 
+void RecordTabuRlIntensificationExpansion() {
+    ++MutableStats().intensification_expansion_calls;
+}
+
 void RecordTabuRlVerification() {
     ++MutableStats().verification_calls;
 }

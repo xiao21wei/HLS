@@ -1,6 +1,6 @@
 # HLS-FJSP 设计说明
 
-本文以当前 `main.cpp`、`DataProc.cpp`、`CoptInitialSolution.cpp`、`GreedySearch.cpp`、`GreedyRlPolicy.cpp`、`RandomSearch.cpp`、`TabuSearch.cpp`、`GuidedSearch.cpp` 和 `AdaptiveSearch.cpp` 的**实际实现**为准。主程序先构造完整可行解，再交替调用贪心、遗传、禁忌及可选的引导式跨机插入搜索；Greedy 可选用 HLS 自主训练的 PPO Actor 筛选邻域动作；程序始终单独保留全局最小 makespan。
+本文以当前 `main.cpp`、`DataProc.cpp`、`CoptInitialSolution.cpp`、`GreedySearch.cpp`、`GreedyRlPolicy.cpp`、`RandomSearch.cpp`、`TabuSearch.cpp`、`TabuRlPolicy.cpp`、`GuidedSearch.cpp` 和 `AdaptiveSearch.cpp` 的**实际实现**为准。主程序先构造完整可行解，再交替调用贪心、遗传、禁忌及可选的引导式跨机插入搜索；Greedy 和 Tabu 可使用 HLS 自主训练的 PPO Actor 筛选邻域动作；程序始终单独保留全局最小 makespan。
 
 本文只描述已经运行的 HLS 代码。`l2s-design.md` 第一阶段的规则候选排序、多轨迹和轻量访问记忆已以第四方法接入；head/tail 安全预筛、公共候选引擎和学习模型仍未实现。
 
@@ -78,7 +78,7 @@ earliest[v] = max(earliest[v], earliest[u] + weight(u,v))
 
 `Schedule::GetKeyProcess()` 通过最早/最迟时间找所有零松弛工序；`GetProcessSlack()` 返回各工序松弛时间，供近关键邻域及等 makespan 解的次级比较使用。它们读取已生成的图和工序列表，不是额外的目标函数。
 
-当前图为工序数加两个虚拟节点的**稠密邻接矩阵**。每次候选通常复制 `Schedule` / 机器序列、重建图并重新拓扑计算；图构造与评估在大实例上有明显的内存和计算开销。稀疏图、增量 makespan 或学习模型均尚未作为当前求值器实现。
+正式 `Schedule` 仍保存工序数加两个虚拟节点的**稠密邻接矩阵**，用于关键路径、slack 和最终解验证。局部搜索候选先由 `ScheduleItemsMakespanEvaluator` 在每个实例开始时缓存工序索引、加工时间和工件弧，再以每个节点最多两条后继边的稀疏 DAG 做拓扑最长路。Greedy 用稀疏 makespan 安全过滤不可能优于当前候选的方案，保留下来的候选仍构造完整图以比较 slack；Tabu 对候选使用稀疏精确 makespan，只为最终选中的移动构造完整 `Schedule`。`HLS_VERIFY_SPARSE_EVALUATOR=1` 会同时运行新旧评价并在不一致时立即报错。
 
 ## 4. 初始解：COPT 加启发式回退
 
@@ -178,7 +178,7 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 外层满足任一条件就停止：
 
 - 从 COPT 开始计时的总时间达到 `total_time_limit_seconds`；
-- 外层搜索次数超过 `1200`；
+- 外层搜索次数超过 `100000`（仅作为异常安全上限，正常停止由总时间和停滞轮控制）；
 - 所有当前启用的方法在某段连续搜索中都至少失败过一次时，累计一个“无全局改进完整轮”；Guided 被关闭时预先视为完成该轮，不改变原三方法停止语义。任一方法刷新全局最好值就重置全部停滞状态。
 
 自适应调度器、遗传、禁忌、Guided 和 Greedy RL 候选采样分别使用由命令行 `random_seed` 异或不同常量派生的随机流。遗传种群、代数、停滞计数和适应度缓存会在同一进程/实例的多次调用之间保留；禁忌搜索会保留当前非最优轨迹、短期禁忌属性、绝对迭代号和移动频率；Guided 会保留多条轨迹、近期调度签名和动作访问频率。Greedy RL 的模型权重在进程启动时读取一次，运行中不在线更新。跨实例时由问题签名重置搜索状态。批量脚本每次调用单独启动可执行文件，因此**不同运行之间不共享**搜索统计或解的记忆。
@@ -193,7 +193,7 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 
 仅当本轮精确关键邻域没有**严格降低 makespan** 时，才额外检查 `0 < slack <= max(6, min(20, Cmax / 40))` 的近关键工序；近关键移动仍需要通过图评价和截止时间限制。
 
-同机重插入和跨机迁移分别选取 best-improvement 候选。`ScheduleQuality` 的比较顺序为 `(makespan, 零松弛工序数, -工序总松弛)`；后两项**仅用于 makespan 相等时**选择结构不同的工作解，最终输出仍按 makespan 判断全局改进。评估一个候选时复制调度对象、更新机器序列、重建 `processList`/图、执行拓扑最长路；成环抛异常并跳过。
+同机重插入和跨机迁移分别选取 best-improvement 候选。`ScheduleQuality` 的比较顺序为 `(makespan, 零松弛工序数, -工序总松弛)`；后两项**仅用于 makespan 相等时**选择结构不同的工作解，最终输出仍按 makespan 判断全局改进。评估时先运行稀疏拓扑最长路；成环或 makespan 已大于当前 best-improvement 的候选直接跳过，只有仍可能胜出的候选才重建 `processList`/稠密图并计算完整 `ScheduleQuality`。
 
 ### 6.2 同机重插入邻域
 
@@ -280,7 +280,7 @@ Actor 输入为 16 维归一化特征：三类动作 one-hot、是否零松弛�
 4. **关键工序同机双工序交换**（至多 250，需内部停滞至少 4 次）：同机两道工序换位，记录两道工序各自的禁忌属性。
 5. **同机重插入**（至多 650）：把候选关键工序从原机器上移到该机器的其他位置。
 
-各邻域的固定配额之和为 2600，同时还有“每轮最多精确评价 2600 个不同候选”的总上限与时间截止。生成候选先按机器序列签名去重，再精确重建图和计算 makespan；有环候选不参与选择。某邻域未用完的配额不会自动转给其他邻域；前序生成器遇到时间/总预算上限，后续邻域可能提前停止。
+各邻域的固定配额之和为 2600，同时还有“每轮最多精确评价 2600 个不同候选”的总上限与时间截止。生成候选先按机器序列签名去重，再用稀疏 DAG 精确计算 makespan；有环候选不参与选择。RL 收集阶段生成的签名会直接传给精确评价器，避免二次序列化；特征中的目标位置只扫描目标机器序列，不再为每个候选重建全工序位置表。某邻域未用完的配额不会自动转给其他邻域；前序生成器遇到时间/总预算上限，后续邻域可能提前停止。
 
 禁忌表记录工序原机器及旧前驱/后继位置对应的**逆移动属性**，不是保存完整调度字符串。双工序交换同时注册两道工序的逆属性。候选的目标位置/机器命中未过期属性时被禁止，除非 makespan 严格小于本次方法最佳值而满足 aspiration；候选即使未被禁忌，若比当前轨迹差过多也会被排除。允许变差的上限为 `max(3, round(0.02 * 本次方法最佳 makespan) + min(20, 2 * 内部停滞次数))`。若没有非禁忌可选解，则取未被变差阈值排除的最低 makespan 候选并清空短期禁忌，避免空邻域直接结束。
 
@@ -288,7 +288,7 @@ Actor 输入为 16 维归一化特征：三类动作 one-hot、是否零松弛�
 
 `tabu_list_length` 是禁忌期限配置值。令 `size_tenure = max(7, round(sqrt(工序数)))`，中心 `center = max(5, (tabu_list_length + size_tenure) / 2)`，下界为 `max(3, center * 2 / 3)`，上界为 `max(下界, center * 4 / 3)`；方法内部停滞至少 5 次时上界再增加 `max(1, size_tenure / 2)`。实际期限在此区间随机抽取，原逆移动属性在 `absolute_iteration + tenure + 1` 到期。配置值不大于 0 时不注册逆移动禁忌。单次调用的内部重启阈值 `max(8, min(40, max(1, max_iter_count / 3)))`，在还有迭代次数时回到本次方法最好解，清空短期禁忌表，并执行 2～5 步扰动。每次实际选定的移动更新访问频率和当前轨迹；到绝对迭代数跨过 300 的倍数时将频率减半、去掉归零的记录。绝对迭代数与禁忌到期时间跨外层调用连续递增。
 
-Tabu 可通过 `HLS_TABU_RL=1` 暂时复用当前 Greedy Actor。五类邻域仍按原顺序生成，但先保存机器序列、移动属性和与 Greedy 一致的 16 维特征，在完整图评价前做混合筛选。候选基数默认 256；工序数达到 80/160/200 时分别扩展到至少 384/512/768。候选池默认由 50% 模型动作、30% 原规则动作和 20% 探索动作组成，并为每类非空邻域额外保证最多 16 个候选。筛选后仍执行原 `NeighborEvaluator` 的精确 makespan、禁忌、aspiration、频率和变差阈值逻辑；没有任何可接受候选时再评价未入选候选。当前模型没有针对 Tabu 多步变差收益训练，因此该功能默认关闭，属于效果待验证的复用方案。
+Tabu 可通过 `HLS_TABU_RL=1` 复用当前 Greedy Actor。五类邻域仍按原顺序生成，但先保存机器序列、移动属性和与 Greedy 一致的 16 维特征，在精确评价前做混合筛选。候选基数默认 256；工序数达到 80/160/200 时分别扩展到至少 384/512/768。候选池默认由 50% 模型动作、30% 原规则动作和 20% 探索动作组成，并为每类非空邻域额外保证最多 16 个候选。shortlist 先执行稀疏精确 makespan、禁忌、aspiration、频率和变差阈值逻辑；若 shortlist 没有找到低于本次 Tabu 最好值的动作，则继续稀疏评价未入选候选，防止 Greedy 模型迁移到 Tabu 后漏掉优质动作。模型仍决定评价顺序并可在找到新最好值时避免全扫；最终选中动作必须重建稠密图且与稀疏 makespan 一致。模型缺失时完整回退原 Tabu。
 
 ### 7.3 Guided Insertion
 
@@ -321,24 +321,28 @@ Tabu 可通过 `HLS_TABU_RL=1` 暂时复用当前 Greedy Actor。五类邻域仍
 
 ## 8. 可行性与评价闭环
 
-所有搜索分支的实际可行性和 makespan 都回到同一张调度图；Greedy RL 只在第一步对动作排序，不改变后续确定性闭环。Greedy 与 Tabu 对单个被选候选典型执行以下流程：
+所有搜索分支使用相同的工件弧、机器弧和整数加工时间语义；Greedy/Tabu RL 只负责动作排序，不直接决定 makespan。Greedy 与 Tabu 的候选典型执行以下流程：
 
 ```text
 改变机器选择或机器顺序
         |
         v
-重建 ScheduleItemsToGraph
+稀疏 DAG 拓扑排序
         |
         v
-拓扑排序：同时检测是否有环并计算 makespan
+同时检测是否有环并精确计算 makespan
         |
    无环才继续，有环则跳过/报错
         |
         v
-按 makespan 选择或接受候选
+Greedy 仅为可能胜出的候选构造完整图
+Tabu 仅为最终选中候选构造完整图
+        |
+        v
+校验完整图 makespan 后选择或接受候选
 ```
 
-`ScheduleItemsToGraph(..., flag=true)` 可同时设置图、工序列表、makespan 和故障率；Greedy/Tabu 候选一般用 `flag=false` 得到图后补齐工序列表，再调用 `CalculateTotalTime()`，仅在胜出时计算故障率。遗传解码走 `flag=true` 的统一路径；COPT 和启发式初始解同样转换为 `Schedule` 后评价。因此 COPT 目标值和方法内部候选最终都以 HLS 这套整数加工时间与图计算出的 makespan 为准。
+`ScheduleItemsToGraph(..., flag=true)` 可同时设置图、工序列表、makespan 和故障率。稀疏求值器不改变目标定义：每条工件弧和机器弧的权重仍是源工序在当前机器上的加工时间；最终选中的 Greedy/Tabu 调度、遗传解码、COPT 解和启发式初始解仍通过完整 `Schedule` 图确认。开发验证开关会对同一候选同时执行稀疏与稠密求值，两者不一致时抛出异常，而不是继续搜索。
 
 ## 9. 参数与实验输出
 
@@ -357,6 +361,8 @@ Tabu 可通过 `HLS_TABU_RL=1` 暂时复用当前 Greedy Actor。五类邻域仍
 | `random_seed` | 当前 Unix 时间（秒） | 调度器、遗传、禁忌及启发式多起点的根随机种子 |
 
 非位置参数环境变量 `HLS_ENABLE_GUIDED_SEARCH` 控制第四方法。程序启动时输出 `guided_search_enabled` 和 `operation_count`，用于确认规模门槛和环境变量最终选择的执行路径。
+
+`run_uniform_rl_experiments.sh` 是当前统一参数验收入口。十个实例共享 `search=0.60`、`random=0.50`、`max_repeat=1000`、`max_iter=45`、种群 32、禁忌长度 30、COPT 300 秒和总时限 3600 秒；Greedy RL 固定 Top-K 256，Tabu RL 固定 Top-K 768，不按实例名称或规模切换 profile。脚本首次运行从 `/dev/urandom` 一次性生成十个独立 seed，最大并发数限制为 5，并输出原始日志、结果、L2S 对比和完整复现配置。提供已有 `SEEDS_FILE` 时只用于复现实验，不重新抽取或替换单个实例 seed。
 
 Greedy PPO 邻域筛选使用以下全局环境变量：
 

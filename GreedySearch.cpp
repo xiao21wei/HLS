@@ -791,8 +791,19 @@ bool EvaluateCandidate(
     const std::vector<Job> &jobs,
     const std::vector<std::string> &job_list,
     std::vector<Machine> &machines,
-    Schedule &candidate
+    Schedule &candidate,
+    const int maximum_makespan
 ) {
+    int sparse_makespan = 0;
+    if (!TryCalculateScheduleItemsMakespan(
+            schedule_items,
+            jobs,
+            job_list,
+            sparse_makespan
+        ) ||
+        sparse_makespan > maximum_makespan) {
+        return false;
+    }
     candidate = base_schedule;
     candidate.set_schedule_id(base_schedule.get_schedule_id() + 1);
     candidate.set_schedule_items(schedule_items);
@@ -812,6 +823,11 @@ bool EvaluateCandidate(
         CalculateTotalTime(candidate);
     } catch (const std::runtime_error &) {
         return false;
+    }
+    if (candidate.get_TotalTime() != sparse_makespan) {
+        throw std::runtime_error(
+            "sparse Greedy evaluator disagrees with dense evaluator"
+        );
     }
     return true;
 }
@@ -836,7 +852,8 @@ void ConsiderCandidate(
             jobs,
             job_list,
             machines,
-            candidate
+            candidate,
+            best_schedule.get_TotalTime()
         )) {
         return;
     }
@@ -899,7 +916,8 @@ Schedule FindBestRlNeighbor(
                 jobs,
                 job_list,
                 machines,
-                candidate
+                candidate,
+                best_schedule.get_TotalTime()
             )) {
             continue;
         }
@@ -1150,7 +1168,8 @@ Schedule FindBestCompoundNeighbor(
                     jobs,
                     job_list,
                     machines,
-                    candidate
+                    candidate,
+                    best_schedule.get_TotalTime()
                 )) {
                 continue;
             }

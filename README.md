@@ -65,15 +65,15 @@ conda activate hls-rl
 
 HLS 自主实现的 Greedy PPO 训练、测试、模型导出和 C++ 开关见 [rl_greedy/README.md](rl_greedy/README.md)。该实现不依赖 L2S 的 Python 模块或已有模型。
 
-当前综合表现最好的固定版本使用每实例 profile，运行命令为：
+当前推荐的正式验证使用一套统一参数，并在运行前为十个实例分别随机生成 seed：
 
 ```bash
-cd /home/luopw24/HLS && PARALLEL_JOBS=5 ./run_best_rl_experiments.sh
+cd /home/luopw24/HLS && PARALLEL_JOBS=5 ./run_uniform_rl_experiments.sh
 ```
 
-该脚本保持 Greedy、GA、Tabu，启用 Greedy RL 与 Tabu RL，并按实例固定已验证的 seed、候选预算和方法加成。最佳已观测组合及证据日志见 [best-rl-results.md](best-rl-results.md)：Mk01～Mk10 中 8 个优于 L2S 十次均值、2 个持平、0 个落后。
+该脚本保持 Greedy、GA、Tabu 和 Guided，启用 Greedy RL 与 Tabu RL；Mk01～Mk10 使用完全相同的搜索、候选和时间参数，最大并发数为 5。未提供 `SEEDS_FILE` 时脚本从 `/dev/urandom` 生成十个独立 seed，随后写入 `best-config.env` 供复现。历史每实例 profile 的最佳观测组合及证据日志仍保存在 [best-rl-results.md](best-rl-results.md)，但不再作为统一参数实验的最终验收结果。
 
-脚本默认把日志、`result.csv` 和 `comparison_l2s.csv` 写入 `run_logs/<运行时间>/`。`COPT_TIME_OVERRIDE`、`TOTAL_TIME_OVERRIDE` 和 `TARGET_MAKESPAN_OVERRIDE` 仅用于短时验证；不设置时使用各实例的固定正式参数。
+脚本默认把 `Mk01.txt`～`Mk10.txt`、`result.csv`、`comparison_l2s.csv`、随机 seed 和 `best-config.env` 写入 `run_logs/<运行时间>/`。默认统一参数为 COPT 300 秒、总时限 3600 秒、`search=0.60`、`random=0.50`、`max_repeat=1000`、`max_iter=45`、种群 32、禁忌长度 30。
 
 ### Greedy PPO 训练与测试
 
@@ -217,6 +217,7 @@ INSTANCES="Mk08 Mk09 Mk10" AGGREGATE_INSTANCES="Mk01 Mk02 Mk03 Mk04 Mk05 Mk06 Mk
 - `GuidedSearch.cpp`：关键/近关键跨机插入、分层 Top-K 精确评价、多轨迹和访问记忆。
 - `Schedule.cpp`：调度对象及关键路径工序计算。
 - `run_brandimarte_experiments.sh`：并行批量实验和 `result.csv` 汇总。
+- `run_uniform_rl_experiments.sh`：统一参数、十个随机 seed、最多五进程的双 RL 正式实验及 L2S 对比汇总。
 - `collect_copt_results.sh`：从日志汇总 COPT 初始解到 `copt.csv`。
 
 ## 设计文档
