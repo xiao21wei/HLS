@@ -13,6 +13,7 @@ constexpr int kMethodCount = 4;
 constexpr int kMinimumInitialCalls = 2;
 constexpr int kMildStagnation = 5;
 constexpr int kDeepStagnation = 12;
+constexpr int kGuidedWarmupCalls = 12;
 
 double ClampProbability(const double value) {
     return std::clamp(value, 0.0, 1.0);
@@ -86,7 +87,8 @@ SearchDecision AdaptiveSearchController::Select(
     const SearchMethodStats &guided_stats =
         statistics_[MethodIndex(SearchMethod::Guided)];
     if (eligible_methods[MethodIndex(SearchMethod::Guided)] &&
-        guided_stats.calls >= 4 && guided_stats.global_improvements == 0) {
+        guided_stats.calls >= kGuidedWarmupCalls &&
+        guided_stats.global_improvements == 0) {
         eligible_methods[MethodIndex(SearchMethod::Guided)] =
             stagnation_count >= kDeepStagnation && total_calls_ % 32 == 0;
     }

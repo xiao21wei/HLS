@@ -13,7 +13,7 @@ HLS-FJSP 是一个使用 C++ 实现的柔性作业车间调度问题（FJSP）�
 3. 如果 COPT 返回可行解，将其转换为 HLS 的机器序列和工序关系图；如果 COPT 在时间限制内没有可行解，则使用基于最早完工时间的多起点 HLS 启发式初始解继续运行。
 4. 贪心搜索先围绕零松弛关键工序执行同机重插入和跨机迁移；只有关键邻域没有改进时，才用较小预算检查近关键工序。
 5. 自适应调度器根据刷新全局最优的近期收益、单位时间收益和失败冷却选择搜索方法。深度停滞时增加探索和多样化起点，但仍由实测收益决定；最后 10% 时间继续保留短 GA。
-6. 对至少 80 道工序的实例，停滞后可调用 Guided Insertion：从最多 6 条持久轨迹生成关键/近关键跨机插入动作，分层选择最多 48 个候选做精确评价。`HLS_ENABLE_GUIDED_SEARCH=0` 可关闭，`force` 可忽略规模门槛。
+6. 对至少 80 道工序的实例，停滞后可调用 Guided Insertion：从最多 6 条持久轨迹生成关键/近关键跨机插入动作，分层选择候选做精确评价。控制器在 Guided 连续 12 次调用无全局改善后才切换为周期探测，避免过早放弃需要多步穿越平台的轨迹。`HLS_ENABLE_GUIDED_SEARCH=0` 可关闭，`force` 可忽略规模门槛。
 7. Greedy 可选用 HLS 自主训练的 PPO Actor 对同机重插入、跨机插入和同机交换动作排序，只精确评价 Top-K；Tabu 也可暂时复用同一模型筛选五类邻域。两者默认关闭，模型不可用时分别回退原始搜索。
 8. 每个被选中的候选方案都重新构造有向图，并通过拓扑排序计算最长路径作为 makespan。
 
@@ -73,7 +73,7 @@ cd /home/luopw24/HLS && PARALLEL_JOBS=5 ./run_uniform_rl_experiments.sh
 
 该脚本保持 Greedy、GA、Tabu 和 Guided，启用 Greedy RL 与 Tabu RL；Mk01～Mk10 使用完全相同的搜索、候选和时间参数，最大并发数为 5。未提供 `SEEDS_FILE` 时脚本从 `/dev/urandom` 生成十个独立 seed，随后写入 `best-config.env` 供复现。历史每实例 profile 的最佳观测组合及证据日志仍保存在 [best-rl-results.md](best-rl-results.md)，但不再作为统一参数实验的最终验收结果。
 
-脚本默认把 `Mk01.txt`～`Mk10.txt`、`result.csv`、`comparison_l2s.csv`、随机 seed 和 `best-config.env` 写入 `run_logs/<运行时间>/`。默认统一参数为 COPT 300 秒、总时限 3600 秒、`search=0.60`、`random=0.50`、`max_repeat=1000`、`max_iter=45`、种群 32、禁忌长度 30、Greedy RL Top-K 256、Tabu RL Top-K 1024，以及每类 Tabu 邻域至少保留 24 个候选。候选预算和各比例可通过脚本中对应的全局环境变量统一覆盖。
+脚本默认把 `Mk01.txt`～`Mk10.txt`、`result.csv`、`comparison_l2s.csv`、随机 seed 和 `best-config.env` 写入 `run_logs/<运行时间>/`。默认统一参数为 COPT 300 秒、总时限 3600 秒、`search=0.60`、`random=0.50`、`max_repeat=1000`、`max_iter=45`、种群 32、禁忌长度 30、Greedy RL Top-K 256、Tabu RL Top-K 1024，以及每类 Tabu 邻域至少保留 24 个候选。候选预算、规则/探索比例和 Tabu 非改善回退可通过对应的全局环境变量统一覆盖。
 
 ### Greedy PPO 训练与测试
 
