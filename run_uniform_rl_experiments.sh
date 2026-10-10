@@ -194,6 +194,7 @@ executable_sha256="$(sha256sum "${EXECUTABLE}" | awk '{print $1}')"
 {
     printf 'EXECUTABLE=%q\n' "${EXECUTABLE}"
     printf 'EXECUTABLE_SHA256=%q\n' "${executable_sha256}"
+    printf 'DATA_DIR=%q\n' "${DATA_DIR}"
     printf 'MODEL_PATH=%q\n' "${MODEL_PATH}"
     printf 'MODEL_SHA256=%q\n' "${model_sha256}"
     printf 'PARALLEL_JOBS=%q\n' "${PARALLEL_JOBS}"
@@ -218,6 +219,19 @@ executable_sha256="$(sha256sum "${EXECUTABLE}" | awk '{print $1}')"
     printf 'TABU_RL_EXPLORATION=%q\n' "${TABU_RL_EXPLORATION}"
     printf 'TABU_RL_MIN_PER_NEIGHBORHOOD=%q\n' \
         "${TABU_RL_MIN_PER_NEIGHBORHOOD}"
+    printf 'HLS_TARGET_MAKESPAN=0\n'
+    printf 'HLS_ENABLE_GUIDED_SEARCH=force\n'
+    printf 'HLS_GREEDY_RL=1\n'
+    printf 'HLS_GREEDY_RL_DYNAMIC_TOP_K=0\n'
+    printf 'HLS_GREEDY_RL_FALLBACK_ON_MISS=1\n'
+    printf 'HLS_GREEDY_RL_VERIFY_WITH_BASELINE=0\n'
+    printf 'HLS_TABU_RL=1\n'
+    printf 'HLS_TABU_RL_DYNAMIC_TOP_K=0\n'
+    printf 'HLS_TABU_RL_FALLBACK_ON_MISS=1\n'
+    printf 'HLS_TABU_RL_FALLBACK_ON_NON_IMPROVEMENT=0\n'
+    printf 'HLS_TABU_RL_VERIFY_FULL_NEIGHBORHOOD=0\n'
+    printf 'COMMAND_TEMPLATE=%q\n' \
+        "${EXECUTABLE} ${DATA_DIR}/%INSTANCE%.fjs ${SEARCH_MODE} ${RANDOM_STRATEGY} ${MAX_REPEAT} ${MAX_ITER} ${POPULATION_SIZE} ${TABU_LENGTH} ${COPT_TIME} ${TOTAL_TIME} %SEED%"
     for index in "${!instances[@]}"; do
         printf 'SEED_%s=%q\n' "${instances[$index]}" "${seeds[$index]}"
     done
