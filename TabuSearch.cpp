@@ -1397,11 +1397,13 @@ void GeneratePathRelinkingNeighbors(
 
 void GenerateCompoundNeighbors(
     const Schedule &schedule,
+    const std::vector<Job> &jobs,
     const CriticalProcesses &critical_processes,
     const CandidateVisitor &visitor
 ) {
     const auto &original_items = schedule.get_schedule_items();
     const auto location_map = BuildProcessLocationMap(original_items);
+    const auto job_id_map = BuildJobIdMap(jobs);
     std::vector<std::pair<int, int>> locations;
     locations.reserve(critical_processes.ordered.size());
     for (const auto &process : critical_processes.ordered) {
@@ -1423,18 +1425,56 @@ void GenerateCompoundNeighbors(
             if (submitted_count >= kMaxCompoundMoves) {
                 return;
             }
-            if (locations[left].first != locations[right].first ||
+            if (locations[left].first == locations[right].first &&
                 locations[left].second == locations[right].second) {
                 continue;
             }
             std::vector<Schedule_item> candidate_items = original_items;
-            auto &processes = candidate_items[locations[left].first].schedule_process;
-            const Schedule_process moved_process = processes[locations[left].second];
+            auto &left_processes =
+                candidate_items[locations[left].first].schedule_process;
+            auto &right_processes =
+                candidate_items[locations[right].first].schedule_process;
+            const Schedule_process moved_process =
+                left_processes[locations[left].second];
             const Schedule_process second_moved_process =
-                processes[locations[right].second];
+                right_processes[locations[right].second];
+            if (locations[left].first != locations[right].first) {
+                const auto left_job = job_id_map.find(moved_process.job_id);
+                const auto right_job = job_id_map.find(
+                    second_moved_process.job_id
+                );
+                if (left_job == job_id_map.end() ||
+                    right_job == job_id_map.end()) {
+                    continue;
+                }
+                const Job_process *left_job_process = FindJobProcess(
+                    *left_job->second,
+                    moved_process.process_id
+                );
+                const Job_process *right_job_process = FindJobProcess(
+                    *right_job->second,
+                    second_moved_process.process_id
+                );
+                const int left_target_machine =
+                    original_items[locations[right].first].machine_id;
+                const int right_target_machine =
+                    original_items[locations[left].first].machine_id;
+                if (left_job_process == nullptr ||
+                    right_job_process == nullptr ||
+                    GetProcessingTime(
+                        *left_job_process,
+                        left_target_machine
+                    ) <= 0 ||
+                    GetProcessingTime(
+                        *right_job_process,
+                        right_target_machine
+                    ) <= 0) {
+                    continue;
+                }
+            }
             std::swap(
-                processes[locations[left].second],
-                processes[locations[right].second]
+                left_processes[locations[left].second],
+                right_processes[locations[right].second]
             );
             auto move = DescribeMove(
                 original_items,
@@ -1723,6 +1763,7 @@ Schedule TabuSearch(
             if (evaluator.CanContinue() && stagnation_count >= 4) {
                 GenerateCompoundNeighbors(
                     current_schedule,
+                    jobs,
                     critical_processes,
                     visitor
                 );
@@ -1784,6 +1825,7 @@ Schedule TabuSearch(
             if (collector.CanContinue() && stagnation_count >= 4) {
                 GenerateCompoundNeighbors(
                     current_schedule,
+                    jobs,
                     critical_processes,
                     collector_visitor(TabuNeighborhoodType::Compound)
                 );
