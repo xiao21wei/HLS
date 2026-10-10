@@ -362,7 +362,7 @@ Tabu 仅为最终选中候选构造完整图
 
 非位置参数环境变量 `HLS_ENABLE_GUIDED_SEARCH` 控制第四方法。程序启动时输出 `guided_search_enabled` 和 `operation_count`，用于确认规模门槛和环境变量最终选择的执行路径。
 
-`run_uniform_rl_experiments.sh` 是当前统一参数验收入口。十个实例共享 `search=0.60`、`random=0.50`、`max_repeat=1000`、`max_iter=45`、种群 32、禁忌长度 30、COPT 300 秒和总时限 3600 秒；Greedy RL 固定 Top-K 256，Tabu RL 固定 Top-K 768，不按实例名称或规模切换 profile。脚本首次运行从 `/dev/urandom` 一次性生成十个独立 seed，最大并发数限制为 5，并输出原始日志、结果、L2S 对比和完整复现配置。提供已有 `SEEDS_FILE` 时只用于复现实验，不重新抽取或替换单个实例 seed。
+`run_uniform_rl_experiments.sh` 是当前统一参数验收入口。十个实例共享 `search=0.60`、`random=0.50`、`max_repeat=1000`、`max_iter=45`、种群 32、禁忌长度 30、COPT 300 秒和总时限 3600 秒；Greedy RL 默认 Top-K 256，Tabu RL 默认 Top-K 1024，每类 Tabu 邻域至少保留 24 个候选，不按实例名称或规模切换 profile。方法加成、Guided Top-K、Greedy/Tabu Top-K、分邻域最低配额以及两者的规则/探索比例都可由全局环境变量统一覆盖，并写入 `best-config.env`。脚本首次运行从 `/dev/urandom` 一次性生成十个独立 seed，最大并发数限制为 5，并输出原始日志、结果、L2S 对比和完整复现配置。提供已有 `SEEDS_FILE` 时只用于复现实验，不重新抽取或替换单个实例 seed。
 
 Greedy PPO 邻域筛选使用以下全局环境变量：
 
