@@ -10,6 +10,7 @@ RUN_TIMESTAMP="${RUN_TIMESTAMP:-$(date +%Y%m%d_%H%M%S)}"
 LOG_DIR="${LOG_DIR:-${SCRIPT_DIR}/run_logs/${RUN_TIMESTAMP}}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-5}"
 SEEDS_FILE="${SEEDS_FILE:-${LOG_DIR}/seeds.txt}"
+INSTANCE_LIST="${INSTANCES:-Mk01 Mk02 Mk03 Mk04 Mk05 Mk06 Mk07 Mk08 Mk09 Mk10}"
 
 SEARCH_MODE="${SEARCH_MODE:-0.60}"
 RANDOM_STRATEGY="${RANDOM_STRATEGY:-0.50}"
@@ -33,7 +34,23 @@ TABU_RL_EXPLORATION="${TABU_RL_EXPLORATION:-0.25}"
 TABU_RL_MIN_PER_NEIGHBORHOOD="${TABU_RL_MIN_PER_NEIGHBORHOOD:-24}"
 TABU_RL_FALLBACK_ON_NON_IMPROVEMENT="${TABU_RL_FALLBACK_ON_NON_IMPROVEMENT:-0}"
 
-instances=(Mk01 Mk02 Mk03 Mk04 Mk05 Mk06 Mk07 Mk08 Mk09 Mk10)
+read -r -a instances <<<"${INSTANCE_LIST}"
+if (( ${#instances[@]} == 0 )); then
+    echo "INSTANCES must contain at least one instance." >&2
+    exit 2
+fi
+declare -A requested_instances=()
+for instance in "${instances[@]}"; do
+    case "${instance}" in
+        Mk01|Mk02|Mk03|Mk04|Mk05|Mk06|Mk07|Mk08|Mk09|Mk10) ;;
+        *) echo "Unsupported instance: ${instance}" >&2; exit 2 ;;
+    esac
+    if [[ -n "${requested_instances[${instance}]:-}" ]]; then
+        echo "Duplicate instance: ${instance}" >&2
+        exit 2
+    fi
+    requested_instances["${instance}"]=1
+done
 
 case "${PARALLEL_JOBS}" in
     ''|*[!0-9]*) echo "PARALLEL_JOBS must be a positive integer." >&2; exit 2 ;;
@@ -53,12 +70,12 @@ fi
 
 mkdir -p "${LOG_DIR}"
 if [[ ! -f "${SEEDS_FILE}" ]]; then
-    od -An -N40 -tu4 /dev/urandom | tr -s '[:space:]' '\n' |
+    od -An -N"$((4 * ${#instances[@]}))" -tu4 /dev/urandom | tr -s '[:space:]' '\n' |
         sed '/^$/d' >"${SEEDS_FILE}"
 fi
 mapfile -t seeds <"${SEEDS_FILE}"
 if (( ${#seeds[@]} != ${#instances[@]} )); then
-    echo "Expected exactly ten seeds in ${SEEDS_FILE}." >&2
+    echo "Expected exactly ${#instances[@]} seeds in ${SEEDS_FILE}." >&2
     exit 2
 fi
 for seed in "${seeds[@]}"; do
@@ -198,6 +215,7 @@ executable_sha256="$(sha256sum "${EXECUTABLE}" | awk '{print $1}')"
     printf 'DATA_DIR=%q\n' "${DATA_DIR}"
     printf 'MODEL_PATH=%q\n' "${MODEL_PATH}"
     printf 'MODEL_SHA256=%q\n' "${model_sha256}"
+    printf 'INSTANCES=%q\n' "${instances[*]}"
     printf 'PARALLEL_JOBS=%q\n' "${PARALLEL_JOBS}"
     printf 'SEARCH_MODE=%q\n' "${SEARCH_MODE}"
     printf 'RANDOM_STRATEGY=%q\n' "${RANDOM_STRATEGY}"

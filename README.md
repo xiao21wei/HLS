@@ -73,6 +73,12 @@ cd /home/luopw24/HLS && PARALLEL_JOBS=5 ./run_uniform_rl_experiments.sh
 
 该脚本保持 Greedy、GA、Tabu 和 Guided，启用 Greedy RL 与 Tabu RL；Mk01～Mk10 使用完全相同的搜索、候选和时间参数，最大并发数为 5。未提供 `SEEDS_FILE` 时脚本从 `/dev/urandom` 生成十个独立 seed，随后写入 `best-config.env` 供复现。历史每实例 profile 的最佳观测组合及证据日志仍保存在 [best-rl-results.md](best-rl-results.md)，但不再作为统一参数实验的最终验收结果。
 
+筛查实例子集时可设置 `INSTANCES`；参数仍对所选实例保持统一，脚本会按实例数量生成并校验 seed。例如优先验证 Mk02、Mk04、Mk05：
+
+```bash
+cd /home/luopw24/HLS && INSTANCES="Mk02 Mk04 Mk05" PARALLEL_JOBS=3 COPT_TIME=30 TOTAL_TIME=300 ./run_uniform_rl_experiments.sh
+```
+
 脚本默认把 `Mk01.txt`～`Mk10.txt`、`result.csv`、`comparison_l2s.csv`、随机 seed 和 `best-config.env` 写入 `run_logs/<运行时间>/`。默认统一参数为 COPT 300 秒、总时限 3600 秒、`search=0.60`、`random=0.50`、`max_repeat=1000`、`max_iter=45`、种群 32、禁忌长度 30、Greedy RL Top-K 256、Tabu RL Top-K 1024，以及每类 Tabu 邻域至少保留 24 个候选。候选预算、规则/探索比例和 Tabu 非改善回退可通过对应的全局环境变量统一覆盖。
 
 ### Greedy PPO 训练与测试
@@ -217,7 +223,7 @@ INSTANCES="Mk08 Mk09 Mk10" AGGREGATE_INSTANCES="Mk01 Mk02 Mk03 Mk04 Mk05 Mk06 Mk
 - `GuidedSearch.cpp`：关键/近关键跨机插入、分层 Top-K 精确评价、多轨迹和访问记忆。
 - `Schedule.cpp`：调度对象及关键路径工序计算。
 - `run_brandimarte_experiments.sh`：并行批量实验和 `result.csv` 汇总。
-- `run_uniform_rl_experiments.sh`：统一参数、十个随机 seed、最多五进程的双 RL 正式实验及 L2S 对比汇总。
+- `run_uniform_rl_experiments.sh`：统一参数、按实例生成随机 seed、支持实例子集、最多五进程的双 RL 实验及 L2S 对比汇总。
 - `collect_copt_results.sh`：从日志汇总 COPT 初始解到 `copt.csv`。
 
 ## 设计文档
