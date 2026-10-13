@@ -147,7 +147,9 @@ cd /home/luopw24/HLS && ./run_optimized_hls.sh
 cd /home/luopw24/HLS && ./run_smartlab_hls.sh
 ```
 
-默认使用当前固定优化方案：Greedy、遗传、Tabu、Guided 和两种 RL 均开启，初始 COPT 时限为 0，单次总时限为 600 秒。输出文件直接写入 HLS 根目录：`HLS_brandimarte.csv`、`HLS_barnes.csv` 和 `HLS_dauzere.csv`，格式为 `instance,run1,...,run10`。完整日志和 `seeds.csv` 位于 `run_logs/smartlab_<运行时间>/`。
+默认使用当前固定优化方案：Greedy、遗传、Tabu、Guided 和两种 RL 均开启，初始 COPT 时限为 0，单次总时限为 **3600 秒**。输出文件直接写入 HLS 根目录：`HLS_brandimarte.csv`、`HLS_barnes.csv` 和 `HLS_dauzere.csv`，格式为 `instance,run1,...,run10`。完整日志、`seeds.csv` 和每 10 分钟一次的活动进程记录 `processes_10min.csv` 位于 `run_logs/smartlab_<运行时间>/`。
+
+每隔 600 秒，`scheduler.log` 会输出当前活动求解进程的 PID、family、instance、run、运行时长、累计 CPU 时间、RSS 内存和 CPU 绑定；同样的信息逐行追加到 `processes_10min.csv`，用于判断进程是否正常推进。
 
 需要将三个 CSV 写入其他目录时可设置 `OUTPUT_DIR=/path/to/output`；默认仍写入 HLS 根目录。
 
@@ -160,7 +162,7 @@ cd /home/luopw24/HLS && ./run_smartlab_hls.sh --dry-run
 也可以统一调整运行次数、总时限或并发上限，例如每个 instance 运行 10 次，最多允许 10 个并发：
 
 ```bash
-cd /home/luopw24/HLS && RUNS=10 MAX_PARALLEL=10 TOTAL_TIME=600 ./run_smartlab_hls.sh
+cd /home/luopw24/HLS && RUNS=10 MAX_PARALLEL=10 TOTAL_TIME=3600 ./run_smartlab_hls.sh
 ```
 
 只运行指定 family：

@@ -79,7 +79,7 @@ def parse_env_parameters():
     os.environ.setdefault("POPULATION_SIZE", "32")
     os.environ.setdefault("TABU_LENGTH", "30")
     os.environ.setdefault("COPT_TIME", "0")
-    os.environ.setdefault("TOTAL_TIME", "600")
+    os.environ.setdefault("TOTAL_TIME", "3600")
     os.environ.setdefault("GUIDED_TOP_K", "96")
     os.environ.setdefault("GREEDY_RL_TOP_K", "256")
     os.environ.setdefault("TABU_RL_TOP_K", "1024")
@@ -213,14 +213,53 @@ def write_family_outputs(directory, config, state):
 
 
 class SmartLabRunner(batch.Runner):
+    def __init__(self, directory, settings, config, state, resources):
+        super().__init__(directory, settings, config, state, resources)
+        self.next_process_report = time.monotonic() + 600.0
+        self.process_report_path = directory / "processes_10min.csv"
+        if not self.process_report_path.exists() or self.process_report_path.stat().st_size == 0:
+            with self.process_report_path.open("w", newline="", encoding="utf-8") as handle:
+                csv.writer(handle).writerow([
+                    "timestamp", "pid", "family", "instance", "run", "seed", "elapsed_seconds",
+                    "cpu_seconds", "rss_mib", "cpus", "status"
+                ])
+
     def environment(self):
         result = super().environment()
         result.update(self.config["experimental_environment"])
         return result
 
+    def process_report(self):
+        process_snapshot = batch.process_stats()
+        rows = []
+        timestamp = batch.now()
+        for pid, item in sorted(self.active.items()):
+            task = item["task"]
+            process = process_snapshot.get(pid, {})
+            rows.append([
+                timestamp, pid, task["family"], task["label_name"], task["run"], task["seed"],
+                "%.1f" % (time.monotonic() - item["started"]),
+                "%.1f" % process.get("cpu", 0.0),
+                "%.1f" % (process.get("rss", 0) / batch.GIB * 1024),
+                task.get("cpus", ""), task["status"]
+            ])
+        if not rows:
+            rows.append([timestamp, "", "", "", "", "", "", "", "", "", "NO_ACTIVE_PROCESS"])
+        with self.process_report_path.open("a", newline="", encoding="utf-8") as handle:
+            csv.writer(handle).writerows(rows)
+        descriptions = [
+            "pid=%s family=%s instance=%s run=%s elapsed=%.0fs cpu=%.1fs rss=%.1fMiB cpus=%s" % (
+                row[1], row[2], row[3], row[4], float(row[6]), float(row[7]), float(row[8]), row[9]
+            ) for row in rows if row[10] != "NO_ACTIVE_PROCESS"
+        ]
+        self.message("10-minute process report: %s" % ("; ".join(descriptions) if descriptions else "no active solver"))
+
     def report(self, snapshot, job_memory, reserve):
         super().report(snapshot, job_memory, reserve)
         write_family_outputs(self.directory, self.config, self.state)
+        if time.monotonic() >= self.next_process_report:
+            self.process_report()
+            self.next_process_report = time.monotonic() + 600.0
 
 
 def install_output_hook():
