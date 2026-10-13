@@ -139,6 +139,42 @@ cd /home/luopw24/HLS && ./run_optimized_hls.sh
 
 查看资源计划可加 `--dry-run`。所有实验使用同一套全局设置，`COPT_TIME`、`TOTAL_TIME`、`MAX_PARALLEL` 等可统一覆盖。中断续跑时设置 `LOG_DIR=<原目录> RESUME=1`，读取原配置与 seed，并跳过成功任务。
 
+### Brandimarte、Barnes、Dauzere 全量重复实验
+
+运行三组 SmartLab FJSP 数据的全部 instance，每个 instance 默认运行 10 次，共 490 次：Brandimarte 10 个、Barnes 21 个、Dauzere 18 个。三个 family 共享一个资源调度器，按当前 CPU quota、CPU 利用率、可用内存和已运行任务的内存占用动态调整并发；默认最多 14 个并发、每个任务绑定 1 个逻辑 CPU。每个实验使用独立随机 seed，seed、完整日志和调度状态保存到时间目录，支持中断续跑。
+
+```bash
+cd /home/luopw24/HLS && ./run_smartlab_hls.sh
+```
+
+默认使用当前固定优化方案：Greedy、遗传、Tabu、Guided 和两种 RL 均开启，初始 COPT 时限为 0，单次总时限为 600 秒。输出文件直接写入 HLS 根目录：`HLS_brandimarte.csv`、`HLS_barnes.csv` 和 `HLS_dauzere.csv`，格式为 `instance,run1,...,run10`。完整日志和 `seeds.csv` 位于 `run_logs/smartlab_<运行时间>/`。
+
+需要将三个 CSV 写入其他目录时可设置 `OUTPUT_DIR=/path/to/output`；默认仍写入 HLS 根目录。
+
+先查看 instance 数量、资源上限和预计任务数，不启动实验：
+
+```bash
+cd /home/luopw24/HLS && ./run_smartlab_hls.sh --dry-run
+```
+
+也可以统一调整运行次数、总时限或并发上限，例如每个 instance 运行 10 次，最多允许 10 个并发：
+
+```bash
+cd /home/luopw24/HLS && RUNS=10 MAX_PARALLEL=10 TOTAL_TIME=600 ./run_smartlab_hls.sh
+```
+
+只运行指定 family：
+
+```bash
+cd /home/luopw24/HLS && ./run_smartlab_hls.sh --families barnes dauzere
+```
+
+默认不会覆盖已有的三个输出文件；确认需要重新生成时设置 `OVERWRITE_OUTPUT=1`。中断后使用原运行目录续跑，已成功的任务会跳过并沿用原 seed：
+
+```bash
+cd /home/luopw24/HLS && LOG_DIR=/home/luopw24/HLS/run_logs/smartlab_<运行时间> RESUME=1 ./run_smartlab_hls.sh
+```
+
 ### Greedy PPO 训练与测试
 
 小批量训练：
