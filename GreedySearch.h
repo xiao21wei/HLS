@@ -11,6 +11,8 @@
 #include "Machine.h"
 #include "SearchDeadline.h"
 
+void ResetGreedySearchState();
+
 // 基于关键工序的迭代 best-improvement 搜索
 Schedule GreedySearch(const Schedule &schedule, const std::vector<Job> &jobs, const std::vector<std::string> &jobList, int iter_count, std::vector<Machine> &machines, SearchDeadline deadline = SearchDeadline::max());
 

@@ -271,6 +271,10 @@ bool TabuRlPolicyEnabled() {
     return MutableConfig().enabled;
 }
 
+void SetTabuRlSamplingSeed(const unsigned int random_seed) {
+    PolicyRng().seed(random_seed);
+}
+
 void RecordTabuRlNeighborhoodSafeguards(const long long count) {
     MutableStats().neighborhood_safeguards += count;
 }

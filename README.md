@@ -81,6 +81,64 @@ cd /home/luopw24/HLS && INSTANCES="Mk02 Mk04 Mk05" PARALLEL_JOBS=3 COPT_TIME=30 
 
 脚本默认把 `Mk01.txt`～`Mk10.txt`、`result.csv`、`comparison_l2s.csv`、随机 seed 和 `best-config.env` 写入 `run_logs/<运行时间>/`。默认统一参数为 COPT 300 秒、总时限 3600 秒、`search=0.60`、`random=0.50`、`max_repeat=1000`、`max_iter=45`、种群 32、禁忌长度 30、Greedy RL Top-K 256、Tabu RL Top-K 1024，以及每类 Tabu 邻域至少保留 24 个候选。候选预算、规则/探索比例和 Tabu 非改善回退可通过对应的全局环境变量统一覆盖。
 
+### 10 个实例各运行 10 次，动态并发
+
+使用当前固定可执行文件和统一参数进行 100 次实验：
+
+```bash
+cd /home/luopw24/HLS && ./run_adaptive_brandimarte.sh
+```
+
+脚本在前台运行，每个实例默认运行 10 次，启用 Greedy RL、Tabu RL 和 Guided，保留贪心、遗传和禁忌搜索。默认 COPT 时限 300 秒、每次总时限 3600 秒，其他搜索参数与上述统一参数入口一致。100 个 seed 在启动时随机生成并保存，不按结果挑选或更换。C++ 模型推理使用 CPU，不需要 GPU 或激活 Conda；启动器会自动寻找 Python 3.8 及以上版本，只使用标准库，也可通过 `PYTHON` 指定解释器。
+
+调度器每 5 秒检查 CPU 利用率、可用内存及当前实验的内存占用，并识别容器的 CPU quota 和内存限制。它逐步增加并发，每次最多增加 2 个任务；当资源不足时停止补充新任务，待正在运行的任务结束后自然降低并发。每个实验默认绑定 1 个逻辑 CPU，COPT 创建的线程也继承这个限制；这一资源设置会影响求解速度，因此本轮会记录实际 CPU 分配。默认每个实验预留 2 GiB，并根据已观测的最大内存占用提高估计；系统预留至少 4 GiB 或内存上限的 10%，取较大值。
+
+可先查看当前资源配额与预计并发上限，不创建结果目录，也不执行实验：
+
+```bash
+cd /home/luopw24/HLS && ./run_adaptive_brandimarte.sh --dry-run
+```
+
+如需限定最多同时运行 10 个实验，仍由脚本在该上限内动态调整：
+
+```bash
+cd /home/luopw24/HLS && MAX_PARALLEL=10 ./run_adaptive_brandimarte.sh
+```
+
+| 环境变量 | 默认值 | 作用 |
+| --- | --- | --- |
+| `RUNS` | `10` | 每个实例运行次数 |
+| `INSTANCES` | `Mk01`～`Mk10` | 实例集合 |
+| `MAX_PARALLEL` | `0` | 并发上限，0 表示按资源计算；也兼容 `PARALLEL_JOBS` |
+| `CPUS_PER_JOB` | `1` | 每个实验绑定的 CPU 数 |
+| `CPU_USAGE_LIMIT` | `0.85` | 目标 CPU 利用率，此外预留至多 1 核 |
+| `JOB_MEMORY_GB` | `2` | 每个实验初始内存预留，单位 GiB |
+| `MEMORY_RESERVE_GB` | `4` | 系统内存预留，同时至少保留内存上限的 10% |
+| `CHECK_INTERVAL` | `5` | 资源检查间隔，单位秒 |
+| `RAMP_UP` | `2` | 每次检查最多新增的实验数 |
+
+所有结果实时写入 `run_logs/<北京时间>/`；具体绝对路径会在启动时输出。`result.csv` 每个实例一行，后接 `run1`～`run10` 的 makespan；`summary.csv` 包含均值、最好值、最差值、样本标准差和当前 `l2s_brandimarte.csv` 的均值对比，未跑满的实例明确标记为 `INCOMPLETE`。`details.csv` 记录每次 seed、状态、耗时和 CPU 分配；`MkXX_runYY.txt` 保存各次完整日志；`scheduler.log`、`scheduler.csv` 和 `status.md` 记录调度过程与实时进度；`seeds.csv`、`config.json` 和 `inputs/` 保存随机种子、统一参数以及可执行文件、模型、数据和 L2S 参考结果的副本与 SHA-256，保证本批实验使用相同版本。
+
+按 `Ctrl+C` 会停止本批启动的实验进程，保存已完成结果。中断或出现失败后，在同一目录续跑时保持原 seed、模型和搜索参数，并跳过已成功完成的实验：
+
+```bash
+cd /home/luopw24/HLS && LOG_DIR=/home/luopw24/HLS/run_logs/<原运行时间> RESUME=1 ./run_adaptive_brandimarte.sh
+```
+
+续跑仅对未成功完成的实验重新执行，原未完成日志保存在 `attempts/`，失败和中断不作为有效 makespan 参与均值。若仍有失败任务，脚本返回非零状态，不把部分结果标记为完整实验。
+
+### 2026-10-13 优化候选的重复验证
+
+新的优化入口保留贪心、遗传、禁忌和 Guided，启用两种 RL，以及动态工序分派、贪心有界联合邻域、GA 工作量重分配、连续禁忌轨迹和统一停滞重启。标准联合邻域失败后间隔尝试包含非关键交换伙伴的扩展邻域。实现细节见 [design.md](design.md) 的可选优化方案。
+
+```bash
+cd /home/luopw24/HLS && ./run_optimized_hls.sh
+```
+
+默认 Mk01～Mk10 各 10 次、随机 seed、每次总时限 600 秒、最多动态并发 14，使用 `build/optimized/production_scheduling`，原固定程序保持可用。初始 COPT 时限为 0，COPT 仅用于 Greedy 内部的有界邻域修复，因此运行仍需 COPT 库及许可证。正式结果须查看对应目录的完整 `summary.csv`，不能用短测或单次最好值替代；本轮正在进行 100 次验证，尚未宣称所有实例的均值达到 L2S。这个时限与先前 3600 秒批次不同。
+
+查看资源计划可加 `--dry-run`。所有实验使用同一套全局设置，`COPT_TIME`、`TOTAL_TIME`、`MAX_PARALLEL` 等可统一覆盖。中断续跑时设置 `LOG_DIR=<原目录> RESUME=1`，读取原配置与 seed，并跳过成功任务。
+
 ### Greedy PPO 训练与测试
 
 小批量训练：

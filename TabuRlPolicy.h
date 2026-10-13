@@ -38,6 +38,7 @@ struct TabuRlStats {
 };
 
 void ConfigureTabuRlPolicyFromEnvironment(unsigned int random_seed);
+void SetTabuRlSamplingSeed(unsigned int random_seed);
 
 const TabuRlRuntimeConfig &GetTabuRlRuntimeConfig();
 

@@ -16,6 +16,7 @@
 
 // 设置禁忌搜索独立随机数生成器的种子。
 void SetTabuSearchSeed(unsigned int random_seed);
+void ResetTabuSearchState(unsigned int random_seed);
 
 // 基于关键块、多机器插入邻域和移动属性禁忌表的禁忌搜索。
 Schedule TabuSearch(const Schedule &schedule, const std::vector<Job> &jobs, const std::vector<std::string> &jobList, int tabu_list_length, int max_iter_count, std::vector<Machine> &machines, SearchDeadline deadline = SearchDeadline::max(), bool use_persistent_state = true);

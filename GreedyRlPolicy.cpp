@@ -272,6 +272,10 @@ bool GreedyRlPolicyEnabled() {
     return MutableConfig().enabled;
 }
 
+void SetGreedyRlSamplingSeed(const unsigned int random_seed) {
+    PolicyRng().seed(random_seed);
+}
+
 void RecordGreedyRlFallback() {
     ++MutableStats().fallback_calls;
 }

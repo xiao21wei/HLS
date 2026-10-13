@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <iomanip>
+#include <limits>
 #include <random>
 #include <string.h>
 #include <vector>
@@ -193,12 +194,106 @@ void AddEliteSchedule(
     }
 }
 
+Schedule BuildDispatchInitialSolution(
+    const std::vector<std::string> &job_list,
+    const std::vector<Job> &jobs,
+    std::vector<Machine> &machines,
+    std::mt19937 &random_engine
+) {
+    struct Slot { int start; int finish; Schedule_process process; };
+    std::vector<const Job *> selected_jobs;
+    for (const auto &name : job_list) {
+        const auto found = std::find_if(jobs.begin(), jobs.end(), [&](const Job &job) {
+            return job.get_job_name() == name;
+        });
+        if (found == jobs.end()) throw std::runtime_error("Dispatch initial solution: missing job");
+        selected_jobs.push_back(&*found);
+    }
+    std::vector<int> next_process(selected_jobs.size(), 0), ready_at(selected_jobs.size(), 0);
+    std::vector<double> remaining_work(selected_jobs.size(), 0.0), priority(selected_jobs.size());
+    int remaining_operations = 0;
+    for (int index = 0; index < static_cast<int>(selected_jobs.size()); ++index) {
+        for (const auto &process : selected_jobs[index]->get_job_process()) {
+            if (process.process_item.empty()) throw std::runtime_error("Dispatch initial solution: empty operation");
+            int minimum = std::numeric_limits<int>::max();
+            for (const auto &option : process.process_item) minimum = std::min(minimum, option.process_time);
+            remaining_work[index] += minimum;
+            ++remaining_operations;
+        }
+        priority[index] = std::uniform_real_distribution<double>(0.8, 1.2)(random_engine);
+    }
+    const double remaining_weight = std::uniform_real_distribution<double>(0.0, 1.2)(random_engine);
+    const double duration_weight = std::uniform_real_distribution<double>(-0.1, 0.4)(random_engine);
+    const double load_weight = std::uniform_real_distribution<double>(0.0, 0.25)(random_engine);
+    std::vector<std::vector<Slot>> slots(machines.size());
+    std::vector<int> workloads(machines.size(), 0);
+    while (remaining_operations > 0) {
+        double best_score = std::numeric_limits<double>::infinity();
+        int best_job = -1, best_machine = -1, best_start = 0, best_duration = 0;
+        for (int job = 0; job < static_cast<int>(selected_jobs.size()); ++job) {
+            const auto &processes = selected_jobs[job]->get_job_process();
+            if (next_process[job] >= static_cast<int>(processes.size())) continue;
+            for (const auto &option : processes[next_process[job]].process_item) {
+                const int machine = option.machine_id;
+                if (machine < 0 || machine >= static_cast<int>(machines.size()) || option.process_time <= 0) {
+                    throw std::runtime_error("Dispatch initial solution: invalid machine/duration");
+                }
+                int start = ready_at[job];
+                for (const auto &slot : slots[machine]) {
+                    if (start + option.process_time <= slot.start) break;
+                    start = std::max(start, slot.finish);
+                }
+                const double score = start + option.process_time + duration_weight * option.process_time -
+                    remaining_weight * priority[job] * remaining_work[job] + load_weight * workloads[machine];
+                if (score < best_score) {
+                    best_score = score;
+                    best_job = job;
+                    best_machine = machine;
+                    best_start = start;
+                    best_duration = option.process_time;
+                }
+            }
+        }
+        if (best_job < 0) throw std::runtime_error("Dispatch initial solution: no ready operation");
+        const auto &process = selected_jobs[best_job]->get_job_process()[next_process[best_job]];
+        Slot inserted{best_start, best_start + best_duration,
+                      {selected_jobs[best_job]->get_job_id(), process.process_item.front().process_id}};
+        auto &sequence = slots[best_machine];
+        const auto position = std::lower_bound(sequence.begin(), sequence.end(), best_start,
+            [](const Slot &slot, const int start) { return slot.start < start; });
+        sequence.insert(position, inserted);
+        workloads[best_machine] += best_duration;
+        ready_at[best_job] = inserted.finish;
+        int minimum = std::numeric_limits<int>::max();
+        for (const auto &option : process.process_item) minimum = std::min(minimum, option.process_time);
+        remaining_work[best_job] -= minimum;
+        ++next_process[best_job];
+        --remaining_operations;
+    }
+    Schedule result;
+    result.set_machine_count(static_cast<int>(machines.size()));
+    std::vector<Schedule_item> items(machines.size());
+    for (int machine = 0; machine < static_cast<int>(machines.size()); ++machine) {
+        items[machine].machine_id = machines[machine].get_machine_id();
+        for (const auto &slot : slots[machine]) items[machine].schedule_process.push_back(slot.process);
+        items[machine].process_count = static_cast<int>(items[machine].schedule_process.size());
+    }
+    result.set_schedule_items(items);
+    ScheduleItemsToGraph(result, items, jobs, job_list, true, machines);
+    int sparse = 0;
+    if (!TryCalculateScheduleItemsMakespan(items, jobs, job_list, sparse) || sparse != result.get_TotalTime()) {
+        throw std::runtime_error("Dispatch initial solution: feasibility or sparse/dense disagreement");
+    }
+    return result;
+}
+
 Schedule BuildMultiStartHeuristicInitialSolution(
     const std::vector<std::string> &job_list,
     const std::vector<Job> &jobs,
     std::vector<Machine> &machines,
     const unsigned int random_seed,
-    const SearchDeadline deadline
+    const SearchDeadline deadline,
+    const int requested_starts = 0
 ) {
     Schedule best_schedule = GenerateInitialSolution(job_list, jobs, machines);
     if (best_schedule.get_graph().empty()) {
@@ -207,22 +302,21 @@ Schedule BuildMultiStartHeuristicInitialSolution(
 
     // Randomized job orders expose different machine bottlenecks while the
     // EET constructor keeps every candidate precedence-feasible.
-    const int start_count = std::min(
-        32,
-        std::max(8, static_cast<int>(jobs.size()) * 2)
-    );
+    const int start_count = requested_starts > 0
+        ? requested_starts
+        : std::min(32, std::max(8, static_cast<int>(jobs.size()) * 2));
     std::mt19937 random_engine(random_seed ^ 0xD1B54A32U);
+    const char *dispatch_flag = std::getenv("HLS_DISPATCH_INITIAL");
+    const bool dispatch_enabled = dispatch_flag != nullptr && std::string(dispatch_flag) == "1";
     std::vector<std::string> shuffled_job_list = job_list;
     for (int start = 1; start < start_count; ++start) {
         if (SearchDeadlineReached(deadline)) {
             break;
         }
         std::shuffle(shuffled_job_list.begin(), shuffled_job_list.end(), random_engine);
-        Schedule candidate = GenerateInitialSolution(
-            shuffled_job_list,
-            jobs,
-            machines
-        );
+        Schedule candidate = dispatch_enabled && start % 2 == 1
+            ? BuildDispatchInitialSolution(job_list, jobs, machines, random_engine)
+            : GenerateInitialSolution(shuffled_job_list, jobs, machines);
         if (!candidate.get_graph().empty() &&
             candidate.get_TotalTime() < best_schedule.get_TotalTime()) {
             best_schedule = std::move(candidate);
@@ -490,6 +584,25 @@ int main(int argc, char *argv[]) {
     method_failed_since_improvement[
         static_cast<int>(SearchMethod::Guided)
     ] = !guided_search_enabled;
+    const char *restart_flag = std::getenv("HLS_ENABLE_RESTARTS");
+    const bool restarts_enabled = restart_flag != nullptr &&
+        std::string(restart_flag) == "1";
+    int restart_stagnation_limit = 40;
+    if (const char *value = std::getenv("HLS_RESTART_STAGNATION_CALLS")) {
+        try {
+            restart_stagnation_limit = std::clamp(std::stoi(value), 8, 1000);
+        } catch (const std::exception &) {
+            std::cerr << "Invalid HLS_RESTART_STAGNATION_CALLS; using 40." << endl;
+        }
+    }
+    std::mt19937 restart_rng(random_seed ^ 0x94D049BBU);
+    int restart_count = 0;
+    int phase_stagnation_calls = 0;
+    std::array<bool, 3> phase_methods_seen{};
+    std::array<SearchMethodStats, 4> completed_phase_stats{};
+    cout << "hybrid_restarts_enabled: "
+         << (restarts_enabled ? "true" : "false") << endl;
+    cout << "hybrid_restart_stagnation_calls: " << restart_stagnation_limit << endl;
 
     while (count <= kMaximumOuterCalls &&
            no_improvement_round_count <= max_repeat_count &&
@@ -507,6 +620,57 @@ int main(int argc, char *argv[]) {
             0.0,
             1.0
         );
+        if (restarts_enabled && phase_stagnation_calls >= restart_stagnation_limit &&
+            remaining_seconds >= 15.0 &&
+            std::all_of(phase_methods_seen.begin(), phase_methods_seen.end(),
+                        [](const bool seen) { return seen; })) {
+            const unsigned int phase_seed = restart_rng();
+            Schedule restart_schedule = BuildMultiStartHeuristicInitialSolution(
+                jobList, jobs, machines, phase_seed,
+                BuildCallDeadline(optimization_deadline, 2.0), 96
+            );
+            if (!restart_schedule.get_graph().empty()) {
+                for (int method = 0; method < 4; ++method) {
+                    const auto &stats = search_controller.GetStats(
+                        static_cast<SearchMethod>(method));
+                    auto &accumulated = completed_phase_stats[method];
+                    accumulated.calls += stats.calls;
+                    accumulated.improvements += stats.improvements;
+                    accumulated.global_improvements += stats.global_improvements;
+                    accumulated.total_relative_gain += stats.total_relative_gain;
+                    accumulated.total_seconds += stats.total_seconds;
+                }
+                input_schedule = std::move(restart_schedule);
+                if (input_schedule.get_TotalTime() < output_schedule.get_TotalTime()) {
+                    output_schedule = input_schedule;
+                }
+                elite_archive.clear();
+                AddEliteSchedule(elite_archive, output_schedule);
+                AddEliteSchedule(elite_archive, input_schedule);
+                ResetGeneticSearchState(phase_seed ^ 0x9E3779B9U);
+                ResetTabuSearchState(phase_seed ^ 0x85EBCA6BU);
+                ResetGuidedSearchState(phase_seed ^ 0xC2B2AE35U);
+                ResetGreedySearchState();
+                SetGreedyRlSamplingSeed(phase_seed ^ 0x27D4EB2DU);
+                SetTabuRlSamplingSeed(phase_seed ^ 0x165667B1U);
+                search_controller = AdaptiveSearchController(
+                    search_mode_param, random_search_strategy_param,
+                    phase_seed ^ 0xA511E9B3U, guided_search_enabled
+                );
+                phase_methods_seen.fill(false);
+                phase_stagnation_calls = 0;
+                stagnation_call_count = 0;
+                method_failed_since_improvement.fill(false);
+                method_failed_since_improvement[static_cast<int>(SearchMethod::Guided)] =
+                    !guided_search_enabled;
+                ++restart_count;
+                cout << "Hybrid restart: phase=" << restart_count
+                     << ", derived_seed=" << phase_seed
+                     << ", initial_makespan=" << input_schedule.get_TotalTime()
+                     << ", incumbent=" << output_schedule.get_TotalTime() << endl;
+                continue;
+            }
+        }
         const SearchDecision decision = search_controller.Select(
             stagnation_call_count,
             remaining_fraction
@@ -538,6 +702,7 @@ int main(int argc, char *argv[]) {
             call_budget_seconds
         );
         const int global_before_makespan = output_schedule.get_TotalTime();
+        const int phase_before_makespan = input_schedule.get_TotalTime();
         const int local_before_makespan = method_start_schedule->get_TotalTime();
         const SearchDeadline call_started_at = SearchClock::now();
         Schedule candidate_schedule = RunSearchMethod(
@@ -556,6 +721,11 @@ int main(int argc, char *argv[]) {
             SearchClock::now() - call_started_at
         ).count();
         const int local_after_makespan = candidate_schedule.get_TotalTime();
+        if (static_cast<int>(decision.method) < 3) {
+            phase_methods_seen[static_cast<int>(decision.method)] = true;
+        }
+        phase_stagnation_calls = local_after_makespan < phase_before_makespan
+            ? 0 : phase_stagnation_calls + 1;
         const bool improved = local_after_makespan < global_before_makespan;
         if (improved) {
             output_schedule = std::move(candidate_schedule);
@@ -571,6 +741,11 @@ int main(int argc, char *argv[]) {
                 search_controller.ScheduleIntensification();
             }
         } else {
+            if (restarts_enabled &&
+                local_after_makespan < input_schedule.get_TotalTime()) {
+                input_schedule = candidate_schedule;
+                AddEliteSchedule(elite_archive, input_schedule);
+            }
             if (local_after_makespan == global_before_makespan &&
                 ScheduleToString(candidate_schedule) !=
                     ScheduleToString(input_schedule)) {
@@ -622,7 +797,13 @@ int main(int argc, char *argv[]) {
         summary_methods.push_back(SearchMethod::Guided);
     }
     for (const SearchMethod method : summary_methods) {
-        const SearchMethodStats &stats = search_controller.GetStats(method);
+        SearchMethodStats stats = search_controller.GetStats(method);
+        const auto &previous = completed_phase_stats[static_cast<int>(method)];
+        stats.calls += previous.calls;
+        stats.improvements += previous.improvements;
+        stats.global_improvements += previous.global_improvements;
+        stats.total_relative_gain += previous.total_relative_gain;
+        stats.total_seconds += previous.total_seconds;
         cout << SearchMethodName(method)
              << " summary: calls=" << stats.calls
              << ", local_improvements=" << stats.improvements
@@ -672,6 +853,7 @@ int main(int argc, char *argv[]) {
     // output_schedule.to_string();
     // output_schedule.ToMapCode();
     const int ans1 = CalculateTotalTime(output_schedule);
+    cout << "Hybrid restart summary: restarts=" << restart_count << endl;
     // cout << "Total time: " << ans1 << endl;
     // cout << "Time cost: " << time(nullptr) - optimization_start_time << "s" << endl;
     // 对于file_path为fjsp.hurink.vdata-mt20.m5j20c5.txt 输出格式为：hurink.vdata-mt20.m5j20c5

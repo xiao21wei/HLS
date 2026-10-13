@@ -13,6 +13,7 @@
 
 // 设置随机搜索使用的统一随机数种子
 void SetRandomSearchSeed(unsigned int random_seed);
+void ResetGeneticSearchState(unsigned int random_seed);
 
 
 // 随机搜索

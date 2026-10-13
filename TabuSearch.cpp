@@ -167,6 +167,9 @@ struct PersistentTabuState {
     std::unordered_map<std::string, int> tabu_expiration;
     std::optional<Schedule> current_schedule;
     int absolute_iteration = 0;
+    int stagnation_count = 0;
+    int perturbation_steps_remaining = 0;
+    int best_seen_makespan = INT_MAX;
 };
 
 PersistentTabuState &GetPersistentTabuState() {
@@ -1611,6 +1614,11 @@ void SetTabuSearchSeed(const unsigned int random_seed) {
     GetTabuRng().seed(random_seed);
 }
 
+void ResetTabuSearchState(const unsigned int random_seed) {
+    GetPersistentTabuState() = PersistentTabuState{};
+    SetTabuSearchSeed(random_seed);
+}
+
 Schedule TabuSearch(
     const Schedule &schedule,
     const std::vector<Job> &jobs,
@@ -1630,6 +1638,9 @@ Schedule TabuSearch(
     PersistentTabuState &persistent_state = use_persistent_state
         ? GetPersistentTabuState()
         : isolated_state;
+    const char *continuous_flag = std::getenv("HLS_TABU_CONTINUOUS_TRAJECTORY");
+    const bool continuous_trajectory = continuous_flag != nullptr &&
+        std::string(continuous_flag) == "1";
     const std::string problem_signature = BuildProblemSignature(jobs, jobList);
     if (persistent_state.problem_signature != problem_signature) {
         persistent_state = PersistentTabuState{};
@@ -1650,6 +1661,12 @@ Schedule TabuSearch(
     }
     if (!resumed_persistent_trajectory) {
         persistent_state.tabu_expiration.clear();
+        persistent_state.stagnation_count = 0;
+        persistent_state.perturbation_steps_remaining = 0;
+    }
+    if (continuous_trajectory && schedule.get_TotalTime() < persistent_state.best_seen_makespan) {
+        persistent_state.stagnation_count = 0;
+        persistent_state.perturbation_steps_remaining = 0;
     }
     Schedule global_best_schedule = schedule;
     int global_best_makespan = schedule.get_TotalTime();
@@ -1670,7 +1687,7 @@ Schedule TabuSearch(
     );
     const int perturbation_min = EnvironmentInteger(
         "HLS_TABU_PERTURB_MIN",
-        2,
+        continuous_trajectory ? 5 : 2,
         1,
         100
     );
@@ -1678,13 +1695,13 @@ Schedule TabuSearch(
         perturbation_min,
         EnvironmentInteger(
             "HLS_TABU_PERTURB_MAX",
-            5,
+            continuous_trajectory ? 10 : 5,
             1,
             100
         )
     );
-    int stagnation_count = 0;
-    int perturbation_steps_remaining = 0;
+    int stagnation_count = continuous_trajectory ? persistent_state.stagnation_count : 0;
+    int perturbation_steps_remaining = continuous_trajectory ? persistent_state.perturbation_steps_remaining : 0;
     std::unordered_map<std::string, int> &tabu_expiration =
         persistent_state.tabu_expiration;
     std::unordered_map<std::string, int> &move_frequency =
@@ -1704,7 +1721,7 @@ Schedule TabuSearch(
             current_schedule,
             stagnation_count >= 6 || perturbation_steps_remaining > 0
         );
-        RotateCriticalCandidates(critical_processes, iteration);
+        RotateCriticalCandidates(critical_processes, continuous_trajectory ? absolute_iteration : iteration);
         if (critical_processes.ordered.empty()) {
             break;
         }
@@ -2012,6 +2029,9 @@ Schedule TabuSearch(
 
     persistent_state.absolute_iteration += iterations_completed;
     persistent_state.current_schedule = current_schedule;
+    persistent_state.stagnation_count = stagnation_count;
+    persistent_state.perturbation_steps_remaining = perturbation_steps_remaining;
+    persistent_state.best_seen_makespan = std::min(persistent_state.best_seen_makespan, global_best_makespan);
     if (persistent_state.absolute_iteration > 0 &&
         persistent_state.absolute_iteration % 300 < iterations_completed) {
         for (auto it = move_frequency.begin(); it != move_frequency.end();) {

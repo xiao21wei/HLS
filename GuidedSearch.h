@@ -9,6 +9,7 @@
 #include "SearchDeadline.h"
 
 void SetGuidedSearchSeed(unsigned int random_seed);
+void ResetGuidedSearchState(unsigned int random_seed);
 
 Schedule GuidedInsertionSearch(
     const Schedule &schedule,

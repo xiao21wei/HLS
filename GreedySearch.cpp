@@ -8,6 +8,7 @@
 #include <array>
 #include <climits>
 #include <cmath>
+#include <cstdlib>
 #include <optional>
 #include <queue>
 #include <stdexcept>
@@ -19,6 +20,7 @@
 #include <vector>
 
 #include "DataProc.h"
+#include "CoptInitialSolution.h"
 #include "GreedyRlPolicy.h"
 
 namespace {
@@ -34,6 +36,7 @@ constexpr int kMaximumNeutralMoves = 4;
 
 thread_local int gNextCandidateWindow = 0;
 thread_local int gActiveCandidateWindow = 0;
+thread_local int gRepairFailures = 0;
 
 long long BuildProcessId(const int job_id, const int process_id) {
     return (static_cast<long long>(job_id) << 32) ^
@@ -1299,6 +1302,12 @@ Schedule FindBestBaselineGreedyStep(
 
 }  // namespace
 
+void ResetGreedySearchState() {
+    gNextCandidateWindow = 0;
+    gActiveCandidateWindow = 0;
+    gRepairFailures = 0;
+}
+
 Schedule GreedySearch(
     const Schedule &schedule,
     const std::vector<Job> &jobs,
@@ -1506,7 +1515,102 @@ Schedule GreedySearch(
             }
         }
 
+        const char *flexible_repair_flag = std::getenv("HLS_GREEDY_FLEXIBLE_REPAIR");
+        if (flexible_repair_flag != nullptr && std::string(flexible_repair_flag) == "1" &&
+            best_neighbor.get_TotalTime() >= current_schedule.get_TotalTime() &&
+            gActiveCandidateWindow % 2 == 0 && !SearchDeadlineReached(deadline)) {
+            auto repair_processes = ScoreProcessForExchange(current_schedule, jobs, jobList);
+            const auto near_processes = RankCriticalProcesses(current_schedule, jobs, false, true);
+            repair_processes.insert(repair_processes.end(), near_processes.begin(), near_processes.end());
+            if (!repair_processes.empty()) {
+                const int offset = (gActiveCandidateWindow / 2 * 8) % repair_processes.size();
+                std::rotate(repair_processes.begin(), repair_processes.begin() + offset, repair_processes.end());
+                const char *relay_flag = std::getenv("HLS_GREEDY_REPAIR_RELAYS");
+                const bool use_relays = relay_flag != nullptr && std::string(relay_flag) == "1" &&
+                    gRepairFailures >= 2 && gActiveCandidateWindow % 4 == 0;
+                if (use_relays) {
+                    // Critical-only releases cannot exchange load with a busy
+                    // alternative machine whose operations have positive slack.
+                    // Include flexible partners on those machines in the SAME
+                    // joint neighborhood, without requiring an improving first move.
+                    const auto &items = current_schedule.get_schedule_items();
+                    const auto locations = BuildProcessLocationMap(items);
+                    const auto job_map = BuildJobIdMap(jobs);
+                    const auto workloads = BuildMachineWorkloads(items, job_map);
+                    std::unordered_set<int> target_machines, source_machines;
+                    std::unordered_set<std::string> seen;
+                    std::vector<std::string> combined;
+                    const int anchor_count = std::min(8, static_cast<int>(repair_processes.size()));
+                    for (int anchor = 0; anchor < anchor_count; ++anchor) {
+                        const auto parsed = ParseProcessKey(repair_processes[anchor]);
+                        if (!parsed || !job_map.contains(parsed->first)) continue;
+                        const auto location = locations.find(BuildProcessId(parsed->first, parsed->second));
+                        if (location == locations.end()) continue;
+                        source_machines.insert(items[location->second.machine_index].machine_id);
+                        const auto *process = FindJobProcess(*job_map.at(parsed->first), parsed->second);
+                        if (process != nullptr) {
+                            for (const auto &option : process->process_item) target_machines.insert(option.machine_id);
+                        }
+                        if (seen.insert(repair_processes[anchor]).second) combined.push_back(repair_processes[anchor]);
+                    }
+                    struct Relay { std::string key; int machine; int workload; int duration; bool reverse; };
+                    std::vector<Relay> relays;
+                    for (int machine = 0; machine < static_cast<int>(items.size()); ++machine) {
+                        if (!target_machines.contains(items[machine].machine_id)) continue;
+                        for (const auto &operation : items[machine].schedule_process) {
+                            if (!job_map.contains(operation.job_id)) continue;
+                            const auto *process = FindJobProcess(*job_map.at(operation.job_id), operation.process_id);
+                            if (process == nullptr || process->process_item.size() < 2) continue;
+                            bool reverse = false;
+                            for (const auto &option : process->process_item) {
+                                reverse = reverse || (option.machine_id != items[machine].machine_id &&
+                                    source_machines.contains(option.machine_id));
+                            }
+                            relays.push_back({BuildProcessKey(operation.job_id, operation.process_id), machine,
+                                workloads[machine], GetProcessingTime(*process, items[machine].machine_id), reverse});
+                        }
+                    }
+                    std::sort(relays.begin(), relays.end(), [](const Relay &left, const Relay &right) {
+                        return std::make_tuple(!left.reverse, -left.workload, -left.duration, left.key) <
+                               std::make_tuple(!right.reverse, -right.workload, -right.duration, right.key);
+                    });
+                    std::unordered_map<int, int> per_machine;
+                    for (const auto &relay : relays) {
+                        if (per_machine[relay.machine] >= 3 || !seen.insert(relay.key).second) continue;
+                        combined.push_back(relay.key);
+                        ++per_machine[relay.machine];
+                    }
+                    for (const auto &key : repair_processes) if (seen.insert(key).second) combined.push_back(key);
+                    repair_processes = std::move(combined);
+                }
+                Schedule repaired = RepairCoptFlexibleNeighborhood(
+                    current_schedule, repair_processes, jobList, jobs, machines, deadline,
+                    use_relays ? 0 : 24, use_relays ? 0.0 : 3.0);
+                gRepairFailures = repaired.get_TotalTime() < current_schedule.get_TotalTime() ? 0 : gRepairFailures + 1;
+                if (repaired.get_TotalTime() < best_neighbor.get_TotalTime()) best_neighbor = std::move(repaired);
+            }
+        }
+
         if (!IsBetterSchedule(best_neighbor, current_schedule)) {
+            const char *repair_flag = std::getenv("HLS_GREEDY_COPT_REPAIR");
+            if (repair_flag != nullptr && std::string(repair_flag) == "1" &&
+                gActiveCandidateWindow % 4 == 0 && !SearchDeadlineReached(deadline)) {
+                auto repair_processes = ScoreProcessForExchange(current_schedule, jobs, jobList);
+                const auto near_processes = RankCriticalProcesses(current_schedule, jobs, false, true);
+                repair_processes.insert(repair_processes.end(), near_processes.begin(), near_processes.end());
+                if (!repair_processes.empty()) {
+                    const int offset = (gActiveCandidateWindow / 4 * 8) % repair_processes.size();
+                    std::rotate(repair_processes.begin(), repair_processes.begin() + offset,
+                                repair_processes.end());
+                    best_neighbor = RepairCoptMachineSequence(current_schedule, repair_processes,
+                                                             jobList, jobs, machines, deadline);
+                    if (best_neighbor.get_TotalTime() < current_schedule.get_TotalTime()) {
+                        current_schedule = std::move(best_neighbor);
+                        neutral_move_count = 0;
+                        continue;
+                    }
+                }
+            }
             break;
         }
         if (best_neighbor.get_TotalTime() == current_schedule.get_TotalTime()) {

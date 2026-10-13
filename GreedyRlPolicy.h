@@ -35,6 +35,7 @@ struct GreedyRlStats {
 };
 
 void ConfigureGreedyRlPolicyFromEnvironment(unsigned int random_seed);
+void SetGreedyRlSamplingSeed(unsigned int random_seed);
 
 const GreedyRlRuntimeConfig &GetGreedyRlRuntimeConfig();
 

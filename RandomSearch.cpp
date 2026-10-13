@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <climits>
+#include <cstdlib>
 #include <ctime>
 #include <iostream>
 #include <numeric>
@@ -620,6 +621,69 @@ int TournamentSelect(const std::vector<Individual> &population, const int exclud
     return best_index;
 }
 
+bool ApplyWorkloadRedistribution(
+    Individual &individual,
+    const std::vector<Job> &jobs,
+    const std::vector<std::string> &jobList
+) {
+    const auto job_name_map = BuildJobNameMap(jobs);
+    const auto ordered_jobs = BuildOrderedJobsByJobList(jobList, job_name_map);
+    std::vector<const Job_process *> genes;
+    int machine_count = 0;
+    for (const Job *job : ordered_jobs) {
+        if (job == nullptr) return false;
+        for (const auto &process : job->get_job_process()) {
+            genes.push_back(&process);
+            for (const auto &option : process.process_item) machine_count = std::max(machine_count, option.machine_id + 1);
+        }
+    }
+    if (genes.size() != individual.machine_code.size() || machine_count == 0) return false;
+    std::vector<int> workloads(machine_count, 0);
+    for (int gene = 0; gene < static_cast<int>(genes.size()); ++gene) {
+        const int option = individual.machine_code[gene];
+        if (option < 0 || option >= static_cast<int>(genes[gene]->process_item.size())) return false;
+        const auto &assignment = genes[gene]->process_item[option];
+        workloads[assignment.machine_id] += assignment.process_time;
+    }
+    struct Redistribution { int gene; int option; int maximum_load; int duration_change; };
+    std::unordered_set<int> moved;
+    const int move_count = 2 + RandomIndex(5);
+    for (int step = 0; step < move_count; ++step) {
+        const int bottleneck = static_cast<int>(std::max_element(workloads.begin(), workloads.end()) - workloads.begin());
+        std::vector<Redistribution> candidates;
+        for (int gene = 0; gene < static_cast<int>(genes.size()); ++gene) {
+            if (moved.contains(gene)) continue;
+            const auto &options = genes[gene]->process_item;
+            const auto &source = options[individual.machine_code[gene]];
+            if (source.machine_id != bottleneck) continue;
+            for (int option = 0; option < static_cast<int>(options.size()); ++option) {
+                if (option == individual.machine_code[gene]) continue;
+                const auto &target = options[option];
+                int maximum_load = 0;
+                for (int machine = 0; machine < machine_count; ++machine) {
+                    const int load = workloads[machine] - (machine == source.machine_id ? source.process_time : 0) +
+                        (machine == target.machine_id ? target.process_time : 0);
+                    maximum_load = std::max(maximum_load, load);
+                }
+                candidates.push_back({gene, option, maximum_load, target.process_time - source.process_time});
+            }
+        }
+        if (candidates.empty()) break;
+        std::sort(candidates.begin(), candidates.end(), [](const Redistribution &left, const Redistribution &right) {
+            return std::tie(left.maximum_load, left.duration_change, left.gene, left.option) <
+                   std::tie(right.maximum_load, right.duration_change, right.gene, right.option);
+        });
+        const auto selected = candidates[RandomIndex(std::min(4, static_cast<int>(candidates.size())))];
+        const auto &source = genes[selected.gene]->process_item[individual.machine_code[selected.gene]];
+        const auto &target = genes[selected.gene]->process_item[selected.option];
+        workloads[source.machine_id] -= source.process_time;
+        workloads[target.machine_id] += target.process_time;
+        individual.machine_code[selected.gene] = selected.option;
+        moved.insert(selected.gene);
+    }
+    return !moved.empty();
+}
+
 bool ApplyCriticalVariation(
     Individual &individual,
     const std::vector<Job> &jobs,
@@ -640,7 +704,11 @@ bool MutateIndividual(
         return false;
     }
     bool critical_variation_applied = false;
-    if (RandomChance(0.65)) {
+    const char *workload_flag = std::getenv("HLS_GA_WORKLOAD_REDISTRIBUTION");
+    if (workload_flag != nullptr && std::string(workload_flag) == "1" && RandomChance(0.50)) {
+        critical_variation_applied = ApplyWorkloadRedistribution(individual, jobs, jobList);
+    }
+    if (!critical_variation_applied && RandomChance(0.65)) {
         critical_variation_applied = ApplyCriticalVariation(
             individual,
             jobs,
@@ -1133,6 +1201,26 @@ void AddRandomImmigrants(
     while (static_cast<int>(population.size()) < target_size &&
            attempts < target_size * 10 &&
            !SearchDeadlineReached(deadline)) {
+        const char *local_restart_flag = std::getenv("HLS_GA_LOCAL_RESTART");
+        const bool local_restart = local_restart_flag != nullptr &&
+            std::string(local_restart_flag) == "1";
+        if (local_restart && !population.empty() && attempts % 3 != 2) {
+            const int elite_count = std::min(4, static_cast<int>(population.size()));
+            Individual immigrant = population[RandomIndex(elite_count)];
+            const int perturbation_count = 1 + RandomIndex(3);
+            for (int move = 0; move < perturbation_count; ++move) {
+                if (!ApplyCriticalVariation(immigrant, jobs, jobList,
+                                             base_schedule, machines)) {
+                    OperationVariation(immigrant.operation_code,
+                                       immigrant.operation_code);
+                }
+            }
+            immigrant.fitness = INT_MAX;
+            AddUniqueIndividual(std::move(immigrant), population, population_keys,
+                                jobs, jobList, base_schedule, machines, fitness_cache);
+            ++attempts;
+            continue;
+        }
         RandomInitializePopulation(
             jobs,
             machines,
@@ -1259,6 +1347,11 @@ void UpdateBestSchedule(
 
 void SetRandomSearchSeed(const unsigned int random_seed) {
     GetSharedRng().seed(random_seed);
+}
+
+void ResetGeneticSearchState(const unsigned int random_seed) {
+    GetPersistentGeneticState() = PersistentGeneticState{};
+    SetRandomSearchSeed(random_seed);
 }
 
 Schedule RandomSearch(
@@ -1704,9 +1797,11 @@ Schedule DecodeSchedule(
     }
 
     std::vector<std::vector<int>> machine_matrix(maximum_job_id + 1);
+    std::vector<std::vector<int>> duration_matrix(maximum_job_id + 1);
     std::vector<int> now_process_index(maximum_job_id + 1, 0);
     for (const auto &job : jobs) {
         machine_matrix[job.get_job_id()].assign(job.get_process_count(), -1);
+        duration_matrix[job.get_job_id()].assign(job.get_process_count(), 0);
     }
 
     size_t machine_code_index = 0;
@@ -1726,6 +1821,8 @@ Schedule DecodeSchedule(
             const int process_id = job_process.process_item.front().process_id;
             machine_matrix[job->get_job_id()][process_id] =
                 job_process.process_item[selected_option].machine_id;
+            duration_matrix[job->get_job_id()][process_id] =
+                job_process.process_item[selected_option].process_time;
         }
     }
 
@@ -1737,6 +1834,18 @@ Schedule DecodeSchedule(
         schedule_items[machine_id].machine_id = machine_id;
         schedule_items[machine_id].process_count = 0;
     }
+
+    const char *active_decode_flag = std::getenv("HLS_GA_ACTIVE_DECODE");
+    const bool active_decode = active_decode_flag != nullptr &&
+        std::string(active_decode_flag) == "1";
+    struct MachineInterval {
+        int start;
+        int finish;
+    };
+    std::vector<std::vector<MachineInterval>> intervals(
+        schedule.get_machine_count()
+    );
+    std::vector<int> job_ready(maximum_job_id + 1, 0);
 
     for (const int job_id : operation_sequencing_code) {
         const auto job_it = job_id_map.find(job_id);
@@ -1751,7 +1860,34 @@ Schedule DecodeSchedule(
         if (machine_id < 0 || machine_id >= schedule.get_machine_count()) {
             throw std::runtime_error("Invalid decoded machine id.");
         }
-        schedule_items[machine_id].schedule_process.push_back({job_id, process_index});
+        auto &machine_processes = schedule_items[machine_id].schedule_process;
+        if (active_decode) {
+            const int duration = duration_matrix[job_id][process_index];
+            if (duration <= 0) {
+                throw std::runtime_error("Invalid decoded processing time.");
+            }
+            auto &machine_intervals = intervals[machine_id];
+            int start = job_ready[job_id];
+            int position = 0;
+            for (; position < static_cast<int>(machine_intervals.size());
+                 ++position) {
+                if (start + duration <= machine_intervals[position].start) {
+                    break;
+                }
+                start = std::max(start, machine_intervals[position].finish);
+            }
+            machine_processes.insert(
+                machine_processes.begin() + position,
+                {job_id, process_index}
+            );
+            machine_intervals.insert(
+                machine_intervals.begin() + position,
+                {start, start + duration}
+            );
+            job_ready[job_id] = start + duration;
+        } else {
+            machine_processes.push_back({job_id, process_index});
+        }
         ++schedule_items[machine_id].process_count;
     }
 

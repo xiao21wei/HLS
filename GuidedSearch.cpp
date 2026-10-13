@@ -804,6 +804,11 @@ void SetGuidedSearchSeed(const unsigned int random_seed) {
     GetGuidedRng().seed(random_seed);
 }
 
+void ResetGuidedSearchState(const unsigned int random_seed) {
+    GetPersistentState() = PersistentGuidedState{};
+    SetGuidedSearchSeed(random_seed);
+}
+
 Schedule GuidedInsertionSearch(
     const Schedule &schedule,
     const std::vector<Schedule> &seed_schedules,
