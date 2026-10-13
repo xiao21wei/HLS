@@ -99,7 +99,7 @@ def parse_args():
     parser.add_argument("--log-dir", default=os.environ.get("LOG_DIR"))
     parser.add_argument("--resume", action="store_true", default=os.environ.get("RESUME", "0") == "1")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--max-parallel", type=int, default=int(os.environ.get("MAX_PARALLEL", "0")))
+    parser.add_argument("--max-parallel", type=int, default=int(os.environ.get("MAX_PARALLEL", "14")))
     parser.add_argument("--cpus-per-job", type=int, default=int(os.environ.get("CPUS_PER_JOB", "1")))
     parser.add_argument("--cpu-usage-limit", type=float, default=float(os.environ.get("CPU_USAGE_LIMIT", "0.95")))
     parser.add_argument("--reserve-cpus", type=float, default=float(os.environ.get("CPU_RESERVE", "0")))
