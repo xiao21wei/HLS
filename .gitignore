@@ -15,6 +15,8 @@
 
 # Experiment logs and generated result files
 /run_logs*/
+/l2s_logs/
+/logs_rl/
 /results/
 /test_save/
 /copt_progress_checks/
@@ -55,5 +57,6 @@ Thumbs.db
 .env.*
 *.lic
 *.license
+*.lock
 *.tmp
 *.temp

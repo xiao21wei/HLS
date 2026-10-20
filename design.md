@@ -4,41 +4,15 @@
 
 本文描述实际实现，并区分默认路径和显式启用的优化开关。`l2s-design.md` 的规则候选排序、多轨迹和轻量访问记忆已以第四方法接入；Greedy/Tabu 的公共候选引擎和通用 head/tail 候选预筛仍未实现。下述联合邻域内部已经使用固定前序图的 head/tail 界限，不能将两者混为一谈。
 
-## 2026-10-13 可选优化方案
+实现核对日期：2026-10-15。文档中的“C++ 默认值”指直接启动程序且未设置相应环境变量；“当前批量配置”指 `run_smartlab_hls.sh` 的统一配置，二者不能混用。
 
-`run_optimized_hls.sh` 使用单独的 `build/optimized/production_scheduling`，保留原固定程序 `build/production_scheduling`。它为所有实例启用同一组开关；这一入口的搜索质量必须以对应批次完整重复实验为准。正式验证目录为 `codex_runs/20261013_deadline_optimization/final-100-600/`，每个实例 10 次、独立随机 seed、总时限 600 秒。原 3600 秒批次仍保留，两批时限不同。截止本文更新，新的 100 次验证尚在运行，不能把三次短测或单次最好值描述为已满足最终目标。
+| 入口 | 可执行文件与默认时限 | 算法配置与用途 |
+| --- | --- | --- |
+| 直接调用 C++ 程序 | 调用者指定；初始 COPT 300 秒，总优化 3600 秒 | Greedy/Tabu RL 及新增修复、重启等开关默认关闭；Guided 按工序规模自动启用 |
+| `run_optimized_hls.sh` | 默认 `build/optimized/production_scheduling`；默认总优化 600 秒、初始 COPT 0 秒 | Brandimarte 各 10 次，启用统一优化配置，用于固定版本的重复验证 |
+| `run_smartlab_hls.sh` | 优先 `build/optimized/production_scheduling`；默认总优化 3600 秒、初始 COPT 0 秒 | Brandimarte、Barnes、Dauzere 各实例 10 次；动态并发，分别输出三个系列的 CSV |
 
-### 多起点动态工序分派
-
-`HLS_DISPATCH_INITIAL=1` 时，多起点构造交替使用原有随机工件排序 EET 和新的 `BuildDispatchInitialSolution`。新构造在全部工件的下一道就绪工序之间选择，并检查每台兼容机器的可插入时间空隙，避免只将一个工件的全部工序依次追加到机器末尾。优先级综合预计完工时间、加工时间、机器已分配工作量和工件剩余最小加工量；各项权重和工件优先系数由本次根 seed 派生的随机流生成，规则对所有实例一致。
-
-每次只安排工件的下一道工序，开始时间不早于该工件前序完工时间；机器插入位置保持时间区间不重叠。全部工序分配后重建调度图，并以稀疏评价器核对可行性和 makespan。总优化时间仍从初始解构造之前计算。当前优化入口将初始 COPT 时限设为 0，直接使用启发式回退路径；COPT 转为贪心内部的有界联合邻域求解器。
-
-### 贪心联合邻域及交换伙伴
-
-`HLS_GREEDY_FLEXIBLE_REPAIR=1` 时，在常规 RL/规则、近关键和交换邻域未取得严格 makespan 改善后，每隔一次 Greedy 调用尝试联合修复。标准修复同时释放至多 24 道关键/近关键工序的机器分配和加工顺序，最多求解 3 秒，并服从该次 Greedy 调用及总优化截止时间。其他工序保持原机器分配及每台机器上的相对顺序；允许其开始时间随新的前序关系变化。
-
-`HLS_GREEDY_REPAIR_RELAYS=1` 时，连续两次标准修复失败后，每逢 Greedy 调用窗口编号为 4 的倍数，尝试更大的联合邻域。该邻域先保留轮转候选中的 8 个锚点，再在锚点的兼容目标机器上寻找可交换的灵活工序，优先选择能回到源机器的伙伴以及较忙机器上的较长工序，每台机器最多补入 3 个伙伴，最后补入其他关键候选。伙伴可以有正松弛：一次单独迁移可能使目标机器过载，需要把接收机器上的工序同时迁出，才可能降低 makespan。联合模型处理这些相互依赖的变化，不要求第一步单独改善。
-
-扩展修复的全局参数为 `HLS_GREEDY_RELEASE_COUNT=32`、`HLS_GREEDY_REPAIR_SECONDS=8`；标准修复仍为 24/3。两种模式均使用相同的轮转和停滞规则，不查询实例名称。每次联合修复有严格改善时重置失败计数，整轮搜索重启时也清空计数。独立的 `HLS_GREEDY_COPT_REPAIR` 固定机器分配版本仍作为实验开关保留，优化入口没有默认启用它；当当前 makespan 已等于最忙机器工作量时，它无法通过重排继续改善。
-
-### 联合模型的正确性和时间界限
-
-模型为全部工序建立开始时间、加工时间和 makespan 变量。释放工序可以选择任一合法机器，未释放工序只保留原机器；同工件前后约束始终存在。未释放工序在机器上的相对顺序通过固定子序列保留。可能同机且至少含一道释放工序的不同工件工序之间使用条件不重叠约束；同工件工序已有前序约束，不需要额外排序变量。每台机器的分配工作量也是 makespan 的下界。
-
-将工件弧和固定机器子序列弧组成 DAG，按各工序的可选最小加工时间计算 head 和 tail：开始时间至少为 head，完工时间不晚于当前 makespan 减去 tail。排序约束的 Big-M 使用 `当前 makespan - tail[前工序] - head[后工序]`，并省去时间窗口已保证不重叠的工序对。这些界限来自保留约束的放松，不使用历史目标 makespan 或实例专属参数。
-
-模型加载当前合法解作为 MIP start，单线程求解。解出后按选定机器和开始时间重建机器序列、更新工序数量，并重新计算稀疏和完整图 makespan；仅接收实际严格改善。无解、超时或求解器不可用时返回原合法方案。Greedy 的精确邻域、GA、Tabu 和 RL 不会因此被替换。
-
-### GA 的工作量重分配变异
-
-`HLS_GA_WORKLOAD_REDISTRIBUTION=1` 时，变异有 50% 概率先尝试工作量重分配。根据机器选择染色体计算各机器总加工量，在当前最忙机器上枚举合法迁移，按迁移后的最大机器工作量、加工时间变化排序，从前 4 个候选中随机选择，连续调整 2～6 个不同基因。该下界用于产生变异，不作为最终 makespan：之后仍执行原有完整解码、真实适应度评价、选择、交叉、精英保留和局部改善。无可迁移工序时保留原关键工序变异及普通随机变异回退。
-
-### 禁忌轨迹与统一停滞重启
-
-`HLS_TABU_CONTINUOUS_TRAJECTORY=1` 时，Tabu 在连续调用间保留停滞计数和剩余扰动步数，避免每次调用都把逃离局部最优的过程归零。关键候选轮转使用累计迭代编号；停滞扰动默认持续 5～10 步。当前轨迹超出原有容差而需重新初始化时清空这些计数；外部方法传入更好的已知解时重新开始停滞计时。原禁忌属性、藐视准则、频率记忆、RL 分层筛选和回退均保留。
-
-`HLS_ENABLE_RESTARTS=1`、`HLS_RESTART_STAGNATION_CALLS=16` 时，三种必需方法均实际调用过，且当前搜索阶段连续 16 次方法调用未改善阶段工作解后，生成新的 96 起点初始解，清空局部方法的持久轨迹及阶段控制器，重新派生随机流。所有阶段保留同一个全局最好解，总截止时间保持不变；阶段方法统计累计到最终报告。重启不是重抽外部 seed，也不拼接不同版本的实验结果。
+当前批量配置保留 Greedy、GA、Tabu，并对所有实例设置 `HLS_ENABLE_GUIDED_SEARCH=force`，绕过 Guided 的默认规模门槛；Greedy/Tabu 复用同一个已训练 Actor。新增机制包括动态分派初始解、Greedy 的 COPT 联合修复及交换伙伴、GA 工作量重分配、Tabu 跨调用持续扰动和外层停滞重启。以下分别说明实现、触发条件和预算，不将实验开关等同于 C++ 默认路径。
 
 ## 1. FJSP 问题定义
 
@@ -139,9 +113,9 @@ earliest[v] = max(earliest[v], earliest[u] + weight(u,v))
 
 只有设置 `HLS_COPT_PROGRESS_FILE` 时才注册 COPT incumbent 回调：回调在 `COPT_CBCONTEXT_INCUMBENT` 读取 `COPT_CBINFO_BESTOBJ`，按相对于回调创建时刻的秒数写入 `elapsed_seconds,makespan`；正常求解无需此文件。COPT 无可行解、模型/许可证异常或结果提取失败时抛异常并触发回退。
 
-### 4.2 COPT 失败时的回退
+### 4.2 多起点 EET 回退与时间口径
 
-COPT 的作用是提供较好的起点，并不要求整个程序必须依赖 COPT 找到可行 incumbent。若 COPT 抛出异常，`main.cpp` 的 `BuildMultiStartHeuristicInitialSolution` 多次调用 `DataProc.cpp::GenerateInitialSolution`：
+COPT 的作用是提供较好的起点，并不要求整个程序必须依赖 COPT 找到可行 incumbent。若 COPT 抛出异常，`main.cpp` 的 `BuildMultiStartHeuristicInitialSolution` 构造多份完整调度。未启用动态分派时，全部采用 `DataProc.cpp::GenerateInitialSolution`：
 
 1. 先在原 `jobList` 顺序上生成一份解，再最多尝试 `min(32, max(8, 2 * 工件数)) - 1` 个随机打乱工件顺序的起点，始终检查总优化截止时间。
 2. 每个起点按选定工件顺序遍历；一个工件内部始终按工序先后顺序处理。对工序的候选机器，按 `finish = max(job_ready, machine_available) + process_time` 计算预计完工时间，优先选择更早完工的机器；相同时依次比较加工时间、机器可用时间和故障率。
@@ -151,6 +125,25 @@ COPT 的作用是提供较好的起点，并不要求整个程序必须依赖 CO
 
 默认 COPT 时间为 `300` 秒，总时间为 `3600` 秒。优化计时点位于 COPT 调用之前，所以 COPT 消耗的时间会占用总时间预算。实际传给 COPT 的时间限制还会取 `copt_time_limit_seconds` 与总时间限制中的较小值。
 
+当前批量入口设置 `COPT_TIME=0`。初始 COPT 接口因时间不是有限正数而抛出异常，主程序捕获后直接进入多起点启发式，因此日志可能出现 `COPT initial solution unavailable`；这与后续 Greedy 内部启用 COPT 修复并不矛盾。输入解析和模型权重加载位于总优化计时之前，进程总墙钟时间可能略高于算法时间上限。
+
+### 4.3 动态分派与空隙插入
+
+`HLS_DISPATCH_INITIAL=1` 时，多起点仍先保留原始工件顺序的 EET 解；后续尝试在随机打乱工件顺序的 EET 与 `BuildDispatchInitialSolution` 之间交替，取实际 makespan 最小者。动态分派每次只考虑各工件尚未调度的下一道工序，枚举其全部兼容机器，在机器已占用时间区间中寻找不早于工件前序完工的最早空隙，而非仅追加到机器末尾。
+
+对可行的“工序—机器—空隙”组合使用以下分数，分数较小者优先：
+
+```text
+score = 最早开始时间 + 加工时间
+      + duration_weight * 加工时间
+      - remaining_weight * job_priority * 工件剩余最小加工量
+      + load_weight * 机器已分配加工量
+```
+
+每个构造起点从同一派生随机流抽取 `duration_weight ∈ [-0.1, 0.4]`、`remaining_weight ∈ [0, 1.2]`、`load_weight ∈ [0, 0.25]`，各工件 `job_priority ∈ [0.8, 1.2]`。剩余最小加工量是该工件未调度工序各自最短候选加工时间的和；选择一条工序后仅推进所属工件的就绪状态，并更新机器时间区间和工作量。
+
+所有工序安排完成后按机器时间顺序生成完整序列，重建调度图，并核对稀疏评价器。规则不读取实例名称、L2S 目标值或历史最好值。首次回退的默认起点数仍为 `min(32, max(8, 2 * 工件数))`；第 5.1 节的阶段重启显式请求 96 个起点，但受 2 秒构造预算及总截止时间限制，实际可能少于 96 个。
+
 ## 5. HLS 外层搜索流程
 
 当前 HLS 的端到端流程如下：
@@ -158,16 +151,17 @@ COPT 的作用是提供较好的起点，并不要求整个程序必须依赖 CO
 ```text
 读取 FJSP 实例
   -> COPT 在给定时限内生成完整初始解
-     -> 无可行解时使用多起点 EET 启发式回退
+     -> 无可行解或 COPT_TIME=0 时使用多起点 EET/动态分派
   -> Greedy + Tabu 初始强化
   -> 自适应控制器在 Greedy / GA / Tabu / Guided 中选择下一方法
   -> 精确重建调度图，检查可行性并计算 makespan
   -> 更新工作解、全局最好解、精英库和方法收益统计
   -> 新全局最好后再次执行 Greedy + Tabu 强化
+  -> 阶段停滞满足条件时换起点，保留全局最好并重置阶段状态
   -> 达到总时限、调用上限或无改进轮数上限后输出全局最好解
 ```
 
-`main.cpp` 分开维护：`output_schedule` 为全局最好方案，`input_schedule` 为后续搜索的工作起点。候选严格优于全局最好时同时更新二者；候选与全局最好 makespan 相同但机器序列不同，也可只更新工作解，供后续搜索穿越等值平台。精英库最多保留 8 个签名互异的方案，按加入顺序淘汰最旧项；它包含严格更好的解，也可能包含等值工作解。深停滞且选中 GA 时可从精英库选择不同起点：65% 选择最新项，其他情况均匀抽取更旧项（只有一项则使用工作解）。
+`main.cpp` 分开维护：`output_schedule` 为全局最好方案，`input_schedule` 为后续搜索的工作起点。候选严格优于全局最好时同时更新二者；候选与全局最好 makespan 相同但机器序列不同，也可只更新工作解，供后续搜索穿越等值平台。启用阶段重启后，即使候选尚未优于全局最好，只要改善本阶段工作解，也会更新 `input_schedule`，使新起点可以持续下降。精英库最多保留 8 个签名互异的方案，按加入顺序淘汰最旧项；包含新最好、等值工作解及重启阶段的局部改善。深停滞且选中 GA 时可从精英库选择不同起点：65% 选择最新项，其他情况均匀抽取更旧项（只有一项则使用工作解）。
 
 搜索方法不再由两层固定概率随机分支决定。`AdaptiveSearchController` 为贪心、遗传、禁忌和启用后的 Guided Insertion 分别记录调用次数、改进次数、累计相对改善、累计耗时和近期单位时间收益。
 
@@ -197,7 +191,7 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 
 当 `calls=0` 时两个成功率均为 0。`阶段偏置` 包括：Tabu 在连续至少 5 次外层停滞后最多加 0.10，Guided 在连续至少 5 次停滞后最多加 0.15，GA 在连续至少 12 次停滞后加 0.12，剩余总时间比例不超过 10% 时 Greedy 加 0.08。固定偏置并不强制选用某一种方法。
 
-`search_mode_param` 给定遗传/禁忌相对于 Greedy 的初始偏好；`random_search_strategy_param` 再把该部分分给遗传与禁忌。原三方法偏好先各设至少 0.05 并在三者间归一化；Guided 单独使用 0.10 探索权重。它们**不是**固定选中概率。进入常规评分前，控制器优先让每个当前符合门控条件且调用不足 2 次的方法完成初始采样；Guided 的两次初始采样仍需先满足规模和停滞门槛。
+`search_mode_param` 给定遗传/禁忌相对于 Greedy 的初始偏好；`random_search_strategy_param` 再把该部分分给遗传与禁忌。原三方法偏好先各设至少 0.05 并在三者间归一化；Guided 单独使用 0.10 探索权重。它们**不是**固定选中概率。进入常规评分前，控制器优先让每个当前符合门控条件且调用不足 2 次的方法完成初始采样；Guided 的两次初始采样仍需先满足启用条件和停滞门槛，`force` 只绕过规模门槛。
 
 搜索阶段规则如下：
 
@@ -209,19 +203,42 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 - 剩余时间不足总预算的 10% 时将单次调用缩短到 2 至 5 秒，遗传搜索仍可继续演化持久化种群。
 - Guided 默认仅在总工序数至少 80 且外层连续停滞至少 5 次后可选；为允许多轨迹跨越中性或轻微劣化平台，前 12 次调用作为 warm-up。12 次调用仍无全局改善时，才只在深度停滞且总调用数为 32 的倍数时重新探测。
 
-四种方法都有内部迭代数和单次墙钟截止时间两层限制。默认 `max_iter_count=30` 时，正常 Greedy 最多 6 轮、强化 Greedy 最多 3 轮；正常 Tabu 最多 30 轮、强化 Tabu 最多 15 轮；GA/Guided 最多 30 代或轮。非强化预算为 Greedy 10 秒、Tabu 20 秒、GA 30 秒、Guided 20 秒；末段 Greedy 最多 2 秒，其他方法最多 5 秒，Tabu/Guided 最多 10 轮。
+四种方法都有内部迭代数和单次墙钟截止时间两层限制。默认 `max_iter_count=30` 时，正常 Greedy 最多 6 轮，其他方法最多 30 代或轮。当前批量配置 `max_iter_count=45` 时的上限如下；任一方法都可能因提前收敛或截止时间而少执行：
+
+| 方法 | 常规调用迭代上限 / 秒数 | 强化调用迭代上限 / 秒数 | 最后 10% 总预算 |
+| --- | --- | --- | --- |
+| Greedy | 9 / 10 | 3 / 3 | 最多 2 轮、2 秒 |
+| Tabu | 45 / 20 | 15 / 10 | 最多 10 轮、5 秒 |
+| GA | 45 代 / 30 | 不加入强化队列 | 最多 5 秒 |
+| Guided | 45 轮 / 20 | 不加入强化队列 | 最多 10 轮、5 秒 |
+
+各次方法调用、GA 内嵌局部搜索、COPT 联合修复和阶段重启都截断到同一个剩余总预算，不分别获得额外的 3600 秒。截止控制依靠方法内部协作检查，模型构造、收尾和输出可能产生小幅超时；批量入口另设进程级看门狗。
 
 外层满足任一条件就停止：
 
 - 从 COPT 开始计时的总时间达到 `total_time_limit_seconds`；
 - 外层搜索次数超过 `100000`（仅作为异常安全上限，正常停止由总时间和停滞轮控制）；
-- 所有当前启用的方法在某段连续搜索中都至少失败过一次时，累计一个“无全局改进完整轮”；Guided 被关闭时预先视为完成该轮，不改变原三方法停止语义。任一方法刷新全局最好值就重置全部停滞状态。
+- 所有当前启用的方法在某段连续搜索中都至少失败过一次时，累计一个“无全局改进完整轮”；该计数超过 `max_repeat_count` 后停止。Guided 被关闭时预先视为完成该轮，不改变原三方法停止语义；刷新全局最好会清零外层停滞轮数和方法失败标志。
+- 显式设置的 `HLS_TARGET_MAKESPAN` 大于 0 且已经达到目标。当前统一批量入口固定为 0，不按实例设目标提前停止。
 
-自适应调度器、遗传、禁忌、Guided 和 Greedy RL 候选采样分别使用由命令行 `random_seed` 异或不同常量派生的随机流。遗传种群、代数、停滞计数和适应度缓存会在同一进程/实例的多次调用之间保留；禁忌搜索会保留当前非最优轨迹、短期禁忌属性、绝对迭代号和移动频率；Guided 会保留多条轨迹、近期调度签名和动作访问频率。Greedy RL 的模型权重在进程启动时读取一次，运行中不在线更新。跨实例时由问题签名重置搜索状态。批量脚本每次调用单独启动可执行文件，因此**不同运行之间不共享**搜索统计或解的记忆。
+自适应调度器、遗传、禁忌、Guided、Greedy RL 和 Tabu RL 候选采样分别使用由命令行 `random_seed` 异或不同常量派生的随机流。遗传种群、代数、停滞计数和适应度缓存会在同一进程/实例的多次调用之间保留；禁忌搜索会保留当前非最优轨迹、短期禁忌属性、绝对迭代号和移动频率；Guided 会保留多条轨迹、近期调度签名和动作访问频率。RL 模型权重在进程启动时读取，运行中不在线更新。跨实例时由问题签名重置搜索状态，阶段重启时主动清空阶段状态。批量脚本每次调用单独启动可执行文件，因此**不同运行之间不共享**搜索统计或解的记忆。
+
+### 5.1 阶段停滞重启
+
+`HLS_ENABLE_RESTARTS=1` 时，额外维护 `phase_stagnation_calls`：本次方法返回值严格改善调用前的阶段工作解则清零，否则加一。它与“连续没有刷新全局最好”的控制器计数不同，从历史精英起点改善也不一定改善当前阶段工作解。
+
+同时满足以下条件才重启：阶段停滞次数达到阈值、该阶段 Greedy/GA/Tabu 均实际调用过、总剩余时间至少 15 秒。`HLS_RESTART_STAGNATION_CALLS` 的 C++ 默认值为 40、允许范围为 8～1000；当前批量入口设为 16。重启过程为：
+
+1. 以最多 2 秒、请求 96 起点重新构造启发式解；若新初始解更好，同样更新全局最好。
+2. 保留全局最好，允许阶段工作解转向较差但不同的新起点；精英库重新加入全局最好和新工作解。
+3. 清空 GA 种群/缓存、Tabu 持久轨迹、Guided 轨迹、Greedy 候选窗口及修复失败计数；重设局部随机流并新建阶段控制器，从 Greedy/Tabu 强化重新开始。
+4. 把旧阶段的方法统计累计到最终报告，重置阶段停滞和调用标记；总优化截止时间保持原值。
+
+根 seed 在进程内不变；重启使用由根 seed 派生的阶段随机流，而非根据已出结果挑选或重抽外部实验 seed。重启不会丢弃全局最好，也不能绕过总时间限制。
 
 ## 6. 贪心局部搜索
 
-贪心搜索位于 `GreedySearch.cpp`，采用迭代 best-improvement：每次从当前方案生成同机重插入和跨机迁移两个邻域，选出最优候选作为下一次搜索起点。主目标仍是 makespan；当候选 makespan 相同，使用“关键工序数量更少、总松弛时间更大”作为次目标，并最多接受 4 次等值结构移动。单步邻域没有继续改善时，还会对关键工序执行受限的双工序同机交换，再决定是否停止。
+贪心搜索位于 `GreedySearch.cpp`，采用迭代 best-improvement：先生成同机重插入和跨机迁移候选；无严格 makespan 改善时补充近关键及同机双工序交换。主目标仍是 makespan；候选 makespan 相同则比较“关键工序数量更少、总松弛时间更大”，最多连续接受 4 次等值结构移动。启用联合修复时，即使单步邻域没有严格改善，也可释放多道工序联合改变机器分配及顺序，之后再决定继续下降或停止。
 
 ### 6.1 关键工序筛选
 
@@ -255,11 +272,58 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 
 设置 `HLS_GREEDY_RL=1` 且成功加载模型后，Greedy 的候选生成规则保持不变，但不再立即对全部动作重建调度图。零松弛阶段先把同机重插入和跨机插入合并为一个轻量动作集合；近关键阶段使用相同流程；前两阶段均无改善时，策略再筛选同机交换动作。动作只保存移动类型、源/目标机器、源/目标位置和特征，尚未成为完整候选调度。
 
-Actor 输入为 16 维归一化特征：三类动作 one-hot、是否零松弛、slack、源/目标加工时间及差值、源/目标机器负载及差值、源/目标位置、位置距离和源/目标序列长度。当前网络为 `16 -> tanh(hidden) -> 1`，默认隐藏层宽度 32。C++ 读取 `HLS_GREEDY_RL_V1` 文本权重并原生计算动作分数，不依赖 Python、PyTorch、ONNX Runtime 或 GPU。
+Actor 输入为 16 维归一化特征：三类动作 one-hot、是否零松弛、slack、源/目标加工时间及差值、源/目标机器负载及差值、源/目标位置、位置距离和源/目标序列长度。网络为 `16 -> tanh(hidden) -> 1`，Python 训练默认隐藏层宽度 32，当前批量使用的 `greedy_policy_brandimarte.txt` 隐藏层宽度为 64。C++ 按文本头部读取网络维度及 `HLS_GREEDY_RL_V1` 权重，原生计算动作分数，不依赖 Python、PyTorch、ONNX Runtime 或 GPU。
 
-候选基数由 `HLS_GREEDY_RL_TOP_K` 给定，默认 96；动态 Top-K 默认开启：工序数少于 80 时保持基数，80～159 扩展到至少 192，160～199 扩展到至少 256，200 及以上扩展到至少 384。候选池默认由模型高分动作、25% 原 Greedy 规则高分动作和 15% `softmax(score / temperature)` 无放回探索动作组成，重复动作去重后再补足目标数量。只有被选中的动作才复制机器序列、调用 `ScheduleItemsToGraph()` 并计算真实 makespan。Greedy 仍按 `ScheduleQuality` 从精确结果中取 best-improvement，模型分数不能直接更新工作解。默认开启 miss fallback：RL 的关键、近关键和交换阶段均未找到可接受解时，补跑一次第 6.1～6.4 节的原始 Greedy 步骤，避免因漏召回而提前终止；这会牺牲局部最优附近的一部分加速收益。模型缺失、版本不匹配或权重非法时，启动日志将 `greedy_rl_enabled` 置为 false，并完整回退原始搜索。
+候选基数由 `HLS_GREEDY_RL_TOP_K` 给定，C++ 默认 96；动态 Top-K 默认开启：工序数少于 80 时保持基数，80～159 扩展到至少 192，160～199 扩展到至少 256，200 及以上扩展到至少 384。默认候选池由模型高分动作、25% 原 Greedy 规则高分动作和 15% `softmax(score / temperature)` 无放回探索动作组成，去重后补足数量。选中动作才进入稀疏精确评价；有机会胜出时再重建完整图比较 `ScheduleQuality`，模型分数不能直接更新工作解。
 
-`rl_greedy/` 在 HLS 仓库内独立实现 `.fjs` 解析、调度图、动作环境、PPO Actor-Critic、训练、测试和文本模型导出，不导入或复制 L2S 仓库内容。合成器默认覆盖每工件 3～15 道工序、每道工序最多 6 台候选机器和 1～20 加工时间，以匹配 Brandimarte 的结构范围，同时保留 Mk01～Mk10 为最终测试集。每个训练状态先精确评价完整动作集合，以真实相对 makespan 收益进行 listwise 排序训练和 hard-negative margin 约束；再用局部收益、incumbent 收益及非改善惩罚执行 PPO 多步微调。排序样本按 80%/20% 拆分，日志在未参与当轮排序更新的样本上报告 Recall@96、ImprovementRecall@96、Regret@96 和真实最优动作中位排名。成环动作保留在策略动作集中，被选中时得到额外惩罚且不改变当前解，以匹配 C++ 先筛选、后精确验证的执行顺序。Python 评价器从同一初始解比较全邻域 Greedy 与混合 Top-K Greedy，同时报告 makespan、精确评价数量、最优动作召回、改善动作召回、regret、可行率和纯模型最优动作排名。正式模型测试对 Mk01～Mk10 各执行一次，结果写入 `rl_greedy/results/<运行时间>/result.csv`，其中包含实例 seed、模型路径与 SHA-256、筛选参数和上述指标。
+默认开启 miss fallback：RL 的关键、近关键和交换阶段均未找到更优 `ScheduleQuality` 时，补跑一次第 6.1～6.4 节的原始 Greedy 步骤。仅有 makespan 持平但结构次目标改善时，不触发该回退。`HLS_GREEDY_RL_VERIFY_WITH_BASELINE=1` 可要求每步同时检查规则基线，通常仅用于验证。模型缺失、版本不匹配或权重非法时，启动日志将 `greedy_rl_enabled` 置为 false，并回退规则搜索。当前批量配置使用固定 Top-K 256、规则比例 30%、探索比例 20%、温度 1，保留 miss fallback，关闭逐步基线验证；候选不足 Top-K 时不保证上述席位比例。
+
+`rl_greedy/` 在 HLS 仓库内独立实现实例解析、调度图、动作环境、PPO Actor-Critic、训练、测试和文本模型导出，不导入或复制 L2S 仓库内容。合成器默认覆盖 6～12 个工件、4～8 台机器、每工件 3～15 道工序、每道工序最多 6 台候选机器和 1～20 加工时间；训练也允许显式提供实例。每个训练状态先精确评价完整动作集合，记录真实相对 makespan 收益、可行性及策略采样轨迹。每个 epoch 先用局部收益、incumbent 收益及非改善惩罚做 PPO 更新，再用动作收益进行 listwise 排序和 hard-negative margin 监督更新。排序样本至少 5 个时按 80%/20% 拆分，日志在未参与当轮排序更新的样本上报告 Recall@96、ImprovementRecall@96、Regret@96 和真实最优动作中位排名；不足 5 个时训练及统计复用同一批排序样本。该拆分仅针对排序更新，不代表独立于 PPO 采样的验证集。成环动作保留在策略动作集中，被选中时得到额外惩罚且不改变当前解，以匹配 C++ 先筛选、后精确验证的顺序。
+
+训练默认 `epochs=100`、每 epoch 16 个 episode、每轨迹最多 30 步、每轮 PPO 更新 4 遍及排序更新 2 遍、学习率 `3e-4`。结束时恢复按 `ImprovementRecall@96 - Regret@96` 选出的最好模型状态，保存训练 checkpoint（默认 `rl_greedy/models/greedy_policy.pt`）及 C++ Actor 文本（默认 `rl_greedy/models/greedy_policy.txt`）。这些是训练入口默认值，不应据此倒推既有 Brandimarte checkpoint 的实际训练配置。
+
+Python 评价器从同一初始解比较全邻域 Greedy 与混合 Top-K Greedy，报告 makespan、精确评价数量、动作召回、regret、可行率和纯模型最优动作排名。Brandimarte 模型测试对 Mk01～Mk10 各执行一次，写入 `rl_greedy/results/<运行时间>/result.csv`，包含实例 seed、模型路径与 SHA-256 及筛选参数；它不是完整 HLS 的 100 次重复实验。模型训练、文本导出和 C++ 推理解耦，完整 HLS 实验使用既有权重，不在每个实例上重新训练。默认合成训练并不能单独证明测试集隔离；实际 checkpoint 的训练输入须查训练记录，而且当前算法已经依据 Brandimarte 实验进行过多轮优化。
+
+### 6.6 COPT 联合邻域与交换伙伴
+
+`HLS_GREEDY_FLEXIBLE_REPAIR=1` 时，常规候选及 RL 回退之后，只要仍未严格降低当前 makespan，且调用窗口编号为偶数、截止时间未到，就尝试联合修复。一次 Greedy 调用只分配一个窗口，内部各迭代复用该窗口；窗口从 0 开始、跨调用递增，阶段重启时归零，因此“每隔一次调用可触发”不等于全进程每两步固定求解一次。
+
+候选由关键工序交换排序与近关键工序组合，按 `(窗口编号 / 2 * 8) % 候选数` 轮转，避免始终释放相同工序。标准修复最多释放 24 道工序，求解上限 3 秒；这是调用点显式传入的覆盖值，不受扩展模式 32/8 参数改变。释放工序允许联合改变机器分配及机器顺序；其他工序固定机器和同机相对顺序，但不固定绝对开始时间。
+
+若同时启用 `HLS_GREEDY_REPAIR_RELAYS=1`、连续至少两次联合修复未严格改善，且窗口编号为 4 的倍数，则使用包含交换伙伴的扩展邻域：
+
+1. 保留轮转候选中的前 8 个锚点，记录源机器及全部兼容目标机器。
+2. 在目标机器上收集拥有多个合法机器选项的工序，允许它们具有正 slack；优先能迁回锚点源机器的工序，再按机器工作量和加工时间从大到小排序。
+3. 每台机器最多补入 3 个未重复伙伴，然后补入其他关键/近关键候选，按释放上限截断。
+
+这样可同时把关键工序迁入某台较忙机器、把接收机器上的其他工序迁出，不要求某个单独迁移先得到改善。扩展模式读取 `HLS_GREEDY_RELEASE_COUNT`（接口默认 24，范围 8～48）与 `HLS_GREEDY_REPAIR_SECONDS`（接口默认 3，范围 0.1～10 秒），当前批量入口统一设置为 32/8。最终求解时间还截断到 Greedy 调用及总优化剩余时间，强化调用中通常无法用满 8 秒。
+
+`gRepairFailures` 统计所有联合修复尝试的连续无严格改善次数，包括标准和扩展模式；任一修复严格降低 makespan 或阶段重启时清零。它不只统计标准修复失败，也不根据实例名称切换邻域。
+
+### 6.7 联合模型、有效界限与结果验证
+
+`RepairCoptFlexibleNeighborhood` 以当前 makespan `H` 为上界，为全部工序建立开始时间变量，为释放工序的合法机器建立二进制分配变量，未释放工序仅保留当前机器选项。加工时间是所选机器加工时间的线性表达式，并非独立的加工时间决策变量。模型最小化连续 makespan，约束包括：
+
+- 每道工序恰好分配一个合法机器，保留全部工件前序弧。
+- 每台机器上未释放工序构成固定相对顺序子序列；释放工序可以插入和迁移。
+- 不同工件、可能同机且至少一条工序被释放的工序对，通过条件不重叠约束和二进制排序变量决定顺序。同工件工序已有工件前序约束。
+- makespan 不小于每台机器的总分配工作量。
+
+将工件弧和固定机器子序列弧组成 DAG，以各工序当前允许选项的最短加工时间 `min_p` 计算 head/tail，得到：
+
+```text
+head[i] <= start[i] <= H - tail[i] - min_p[i]
+Cmax >= start[i] + duration[i] + tail[i]
+M(i -> j) = H - tail[i] - head[j]
+```
+
+对时间窗口已经保证不重叠的工序对省去排序约束。这些界限来自保留约束的放松，与历史目标值或实例专属参数无关；它们只用于该联合模型，不等于 Greedy/Tabu 全部动作已有通用 head/tail 插入预筛。
+
+模型加载当前开始时间、机器分配、排序和 makespan 作为 MIP start，设置单线程，并在构模循环及求解前检查截止时间。剩余不足 0.05 秒时直接返回。达到求解时限但已有可行解时仍可提取；只有无可用解、求解器异常或结果无效才保留原方案。按求解出的机器和开始时间重建序列、更新工序数量后，必须同时通过稀疏与完整图验证，而且实际 makespan 严格降低才接收。联合子问题求解不提供原始 FJSP 全局最优证明。
+
+### 6.8 保留的固定机器重排开关
+
+`HLS_GREEDY_COPT_REPAIR=1` 是另一种固定机器分配、只释放部分顺序的实验机制，当前批量入口关闭。常规搜索没有更优 `ScheduleQuality`、窗口编号为 4 的倍数时才尝试，最多释放 16 道工序、求解 2 秒；当前 makespan 已等于最大机器工作量时直接跳过。它无法通过改变机器分配降低该工作量下界，不应与第 6.6 节的柔性联合修复混淆。
 
 ## 7. 遗传、禁忌与引导式搜索
 
@@ -267,7 +331,7 @@ Actor 输入为 16 维归一化特征：三类动作 one-hot、是否零松弛�
 
 ### 7.1 遗传搜索
 
-`AggressiveSearch` 使用机器选择编码和工序排序编码共同表示一个 FJSP 解：机器基因是该工序候选机器列表的**索引**；工序基因是工件 ID，同一工件的第 N 次出现对应第 N 道工序。编码一个已有解时先对调度图排序形成可行工序顺序，不能顺利生成时回退到按工件排列的基因顺序。解码时把基因依次追加到选定机器序列，并重新建图；保证每个工件出现次数正确及机器选项合法，最终适应度是实际 makespan。`Decode(Encode(schedule))` 在机器分配不变时通常可恢复原顺序，具体解仍以解码后的图评价为准。
+`AggressiveSearch` 使用机器选择编码和工序排序编码共同表示一个 FJSP 解：机器基因是该工序候选机器列表的**索引**；工序基因是工件 ID，同一工件的第 N 次出现对应第 N 道工序。编码一个已有解时先对调度图排序形成可行工序顺序，不能顺利生成时回退到按工件排列的基因顺序。默认解码把基因依次追加到选定机器序列，并重新建图；保证每个工件出现次数正确及机器选项合法，最终适应度是实际 makespan。`Decode(Encode(schedule))` 在机器分配不变时通常可恢复原顺序，具体解仍以解码后的图评价为准。`HLS_GA_ACTIVE_DECODE=1` 可改为空隙插入式解码，当前批量入口为 0；这与初始解动态分派是两个独立开关。
 
 实现使用 `thread_local` 的持久状态，包含问题签名、种群、染色体适应度缓存、交叉/变异统计、累计代数和停滞计数；问题签名变化或种群为空时重建。单次调用将当前工作解编码注入存量种群，并以 `max(4, population_size)` 作为目标规模。缓存键为机器编码与工序编码的组合字符串，**仅在同一实例的进程内**复用。
 
@@ -290,9 +354,13 @@ Actor 输入为 16 维归一化特征：三类动作 one-hot、是否零松弛�
 5. 解码子代，通过调度图计算 makespan，并与父代共同进入候选集合。
 6. 父代和子代按 makespan 排序，保留最优两个不同染色体，再对其余幸存者加最小结构距离筛选；根据停滞情况补充随机移民，最多保留 `population_size` 个方案。
 
-机器编码交叉使用非空且非全集的随机位置子集交换。工序编码使用按工件集合划分的 POX 交叉，保持每个工件的出现次数。普通机器变异每次修改 1 至 3 道柔性工序，75% 的情况下从加工时间最短的两个其他机器选项中抽样，其余情况从全部其他选项抽样。申请变异时以 65% 概率先尝试关键工序变异：临时解码、获取零松弛关键工序，优先改其机器选项或与其他工件的关键基因交换；否则在普通机器/工序变异中二选一。普通工序变异执行不同工件基因的交换、插入或短区间反转，不打乱整条序列。
+机器编码交叉使用非空且非全集的随机位置子集交换。工序编码使用按工件集合划分的 POX 交叉，保持每个工件的出现次数。普通机器变异每次修改 1 至 3 道柔性工序，75% 的情况下从加工时间最短的两个其他机器选项中抽样，其余情况从全部其他选项抽样。进入变异分支后，若尚未由工作量重分配修改染色体，则以 65% 概率尝试关键工序变异：临时解码、获取零松弛关键工序，优先改其机器选项或与其他工件的关键基因交换；仍未改变时在普通机器/工序变异中二选一。普通工序变异执行不同工件基因的交换、插入或短区间反转，不打乱整条序列。
+
+当前启用 `HLS_GA_WORKLOAD_REDISTRIBUTION=1`：先通过自适应变异率的概率门控，进入变异分支后再以 50% 概率尝试工作量重分配，并非所有子代都有 50% 概率执行。先按机器基因计算各机器工作量，再连续尝试修改 2～6 个不同基因；每一步从当前最忙机器枚举可迁出工序及合法目标，按“迁移后最大机器工作量、加工时间增量、基因及选项下标”排序，从前最多 4 项中随机抽取并更新负载。无候选可提前结束，无实际改变则回退关键/普通变异。工作量下界只用于提议变异，最终仍解码并按真实 makespan 选择。
 
 基础变异率为 `0.12`；连续 6 代无改进升至 `0.25`、约 20% 随机移民，12 代无改进升至 `0.45`、约 33% 随机移民。变异尝试至少 8 次后，以 `clamp(base_rate * (1.20 - 0.45 * 变异成功率), 0.05, 0.60)` 做自适应调整。交叉和变异尝试数达到 200 时各自计数和累计收益减半，避免过旧的统计长期主导参数。
+
+当前变异率至少 0.45 时，还以 25% 概率附加一次机器和工序变异。`HLS_GA_LOCAL_RESTART=1` 可让约三分之二的移民来自前 4 个精英的 1～3 次关键扰动，其余仍为随机方案；当前批量入口为 0，保留原随机移民路径。
 
 每隔累计 10 代，或本次调用的最后一代，对子代中较好的个体做 memetic 局部强化：通常至多处理一个，调用的最后一代至多两个。偶数序号精英执行 1 轮 Greedy，奇数序号精英执行最多 6 轮 Tabu（禁忌长度固定为 25，且 `use_persistent_state=false`，不污染主 Tabu 的持续轨迹）。只有强化后确实比该个体更好才重新编码入选，所有嵌套调用共用 GA 的截止时间；达到截止时间时，末代强化可能不执行。
 
@@ -304,7 +372,9 @@ Actor 输入为 16 维归一化特征：三类动作 one-hot、是否零松弛�
 
 `TabuSearch` 分别维护当前轨迹 `current_schedule` 和**本次调用**的最优解 `global_best_schedule`。当前解可以接受有限幅度的非改进移动以跳出局部最优，最佳解只在 makespan 严格降低时更新，因此即使最后一次移动变差，返回值仍为本次调用找到的最好方案。其名字 `global_best_schedule` 是该方法内部的最佳值，外层 `output_schedule` 才是整个 HLS 运行的全局最好值。
 
-默认 `use_persistent_state=true`：持久状态按问题签名保存当前非最优轨迹、各逆移动的禁忌到期迭代号、累计绝对迭代号和位置访问频率。若保存的轨迹比传入的起点差超过 `max(5, round(0.05 * 输入 makespan))`，则丢弃轨迹并清空旧短期禁忌；否则从该轨迹继续。GA 内嵌 Tabu 设置 `use_persistent_state=false`，使用独立临时状态，不影响主 Tabu 分支。更换问题签名时重置持久状态。
+默认 `use_persistent_state=true`：持久状态按问题签名保存当前非最优轨迹、各逆移动的禁忌到期迭代号、累计绝对迭代号和位置访问频率。若保存的轨迹比传入的起点差超过 `max(5, round(0.05 * 输入 makespan))`，则丢弃轨迹并清空旧短期禁忌、停滞和剩余扰动计数；否则从该轨迹继续。GA 内嵌 Tabu 设置 `use_persistent_state=false`，使用独立临时状态，不影响主 Tabu 分支。更换问题签名或阶段重启时重置持久状态。
+
+`HLS_TABU_CONTINUOUS_TRAJECTORY=1` 时，进一步跨调用保存内部停滞计数、未完成扰动步数和历史最好值；关键工序轮转改用累计绝对迭代号，避免每次方法调用都从同一个窗口开始。外部传入解优于该状态已知最好值时，清零停滞及扰动计数。当前批量入口启用此开关；未启用时，轨迹和禁忌/频率记忆仍持久化，但内部停滞及扰动步数从每次调用重新计数。
 
 每轮围绕当前调度的关键工序生成邻域。`GetKeyProcess()` 使用零松弛识别关键工序；若方法内部停滞至少 6 次或处于扰动阶段，再补充 `slack <= max(6, min(20, Cmax / 40))` 的近关键工序。机器上连续两个**严格关键**工序且后者最早开始恰等于前者完工时形成紧致关键弧，连续弧组合为关键块；近关键工序不会被当作严格关键块成员。轮换工序列表起点，每轮机器迁移和顺序移动各最多处理 36 道候选关键工序。
 
@@ -322,9 +392,13 @@ Actor 输入为 16 维归一化特征：三类动作 one-hot、是否零松弛�
 
 停滞至少 4 次后，在 `selection_score = makespan + frequency_weight * 已访问次数` 中施加访问频率惩罚，其中 `frequency_weight = max(0.1, best * 0.0005)`；否则不施加。扰动期维护最多 12 个可选候选，按评分排序，从前最多 6 个中随机选取，允许在有限范围内暂时变差。只在新解严格小于本次方法最佳值时重置内部停滞计数；否则继续当前轨迹。
 
-`tabu_list_length` 是禁忌期限配置值。令 `size_tenure = max(7, round(sqrt(工序数)))`，中心 `center = max(5, (tabu_list_length + size_tenure) / 2)`，下界为 `max(3, center * 2 / 3)`，上界为 `max(下界, center * 4 / 3)`；方法内部停滞至少 5 次时上界再增加 `max(1, size_tenure / 2)`。实际期限在此区间随机抽取，原逆移动属性在 `absolute_iteration + tenure + 1` 到期。配置值不大于 0 时不注册逆移动禁忌。单次调用的内部重启阈值 `max(8, min(40, max(1, max_iter_count / 3)))`，在还有迭代次数时回到本次方法最好解，清空短期禁忌表，并执行 2～5 步扰动。每次实际选定的移动更新访问频率和当前轨迹；到绝对迭代数跨过 300 的倍数时将频率减半、去掉归零的记录。绝对迭代数与禁忌到期时间跨外层调用连续递增。
+`tabu_list_length` 是禁忌期限配置值。令 `size_tenure = max(7, round(sqrt(工序数)))`，中心 `center = max(5, (tabu_list_length + size_tenure) / 2)`，下界为 `max(3, center * 2 / 3)`，上界为 `max(下界, center * 4 / 3)`；方法内部停滞至少 5 次时上界再增加 `max(1, size_tenure / 2)`。实际期限在此区间随机抽取，原逆移动属性在 `absolute_iteration + tenure + 1` 到期。配置值不大于 0 时不注册逆移动禁忌。
+
+内部停滞阈值默认 `max(8, min(40, max(1, 本次迭代上限 / 3)))`，可由 `HLS_TABU_STAGNATION_LIMIT` 在 4～200 内统一覆盖。达到阈值且尚有迭代预算时，回到本次方法最好解、清空短期禁忌并进入扰动；未启用持续轨迹时默认 2～5 步，启用时默认 5～10 步，可通过 `HLS_TABU_PERTURB_MIN/MAX` 在 1～100 内设置。每次实际选定的移动更新访问频率和当前轨迹；绝对迭代数跨过 300 的倍数时频率减半并去掉归零记录。绝对迭代号及禁忌到期时间跨调用连续递增，持续轨迹开关决定扰动能否跨调用完成。
 
 Tabu 可通过 `HLS_TABU_RL=1` 复用当前 Greedy Actor。五类邻域仍按原顺序生成，但先保存机器序列、移动属性和与 Greedy 一致的 16 维特征，在精确评价前做混合筛选。候选基数默认 256；工序数达到 80/160/200 时分别扩展到至少 384/512/768。候选池默认由 50% 模型动作、30% 原规则动作和 20% 探索动作组成，并为每类非空邻域额外保证最多 16 个候选。shortlist 先执行稀疏精确 makespan、禁忌、aspiration、频率和变差阈值逻辑；若 shortlist 没有找到低于本次 Tabu 最好值的动作，则继续稀疏评价未入选候选，防止 Greedy 模型迁移到 Tabu 后漏掉优质动作。模型仍决定评价顺序并可在找到新最好值时避免全扫；最终选中动作必须重建稠密图且与稀疏 makespan 一致。模型缺失时完整回退原 Tabu。
+
+当前批量配置为固定 Top-K 1024、规则比例 30%、探索比例 25%、每类非空邻域至少 24 项。`HLS_TABU_RL_FALLBACK_ON_NON_IMPROVEMENT=0` 只关闭额外的相对当前轨迹无改善回退；只要 shortlist 未改善本次方法最好值，仍会触发上述补评逻辑，受总候选和时间预算限制。故该值为 0 不代表永远不评价 shortlist 以外的动作。Actor 未专门针对禁忌、aspiration 和长期变差收益训练，执行逻辑仍由 Tabu 决定。
 
 ### 7.3 Guided Insertion
 
@@ -332,11 +406,11 @@ Tabu 可通过 `HLS_TABU_RL=1` 复用当前 Greedy Actor。五类邻域仍按原
 
 方法按问题签名保存最多 6 条 `thread_local` 轨迹，每次注入工作解及外层精英库中的不同机器序列。轨迹分别维护当前解、轨迹最好解、停滞/等值/变差步数和最多 128 个近期调度签名；动作访问频率每 20 次方法调用减半，搜索轮次在轨迹间 round-robin 分配。
 
-每轮从最多 32 道零松弛关键工序生成跨机动作；轨迹停滞至少 4 次时再加入最多 16 道近关键工序。每个工序枚举全部其他兼容机器及所有插入位置。便宜评分综合关键工序奖励、加工时间差、源/目标机器负载差、目标位置与当前时间位置的距离和动作频率惩罚；随后分层保留不同工序、不同目标机器、随机探索及高分动作，每轮最多 48 个候选进入完整图评价。
+每轮从最多 32 道零松弛关键工序生成跨机动作；轨迹停滞至少 4 次时再加入最多 16 道近关键工序。每个工序枚举全部其他兼容机器及所有插入位置。便宜评分综合关键工序奖励、加工时间差、源/目标机器负载差、目标位置与当前时间位置的距离和动作频率惩罚；随后分层保留不同工序、不同目标机器、随机探索及高分动作。`HLS_GUIDED_TOP_K` 的 C++ 默认值为 48，当前批量配置为 96；这是进入完整图精确评价的每轮上限。
 
 严格改善总是接受；等值移动最多连续 4 次；停滞至少 4 次时允许最多 4 个、且 makespan 增量不超过 `max(3, round(0.02 * 轨迹最好值))` 的变差移动。轨迹停滞 10 次后回滚自身最好解并清空近期状态。方法只返回所有轨迹及输入起点中的最低 makespan，不把变差工作解覆盖外层全局最好。
 
-默认仅对总工序数至少 80 的实例启用，以保护 Mk01/Mk02 的强基线。`HLS_ENABLE_GUIDED_SEARCH=0` 完全关闭；值为 `force` 时忽略规模门槛；未设置或其他非零值按门槛自动启用。该实现尚未包含 head/tail 可行插入预筛、监督排序器、GNN/PPO、ONNX 或 GPU 推理。
+直接启动 C++ 程序时，默认仅对总工序数至少 80 的实例启用。`HLS_ENABLE_GUIDED_SEARCH=0` 完全关闭；值为 `force` 时忽略规模门槛；未设置或其他非零值按门槛自动启用。当前优化与 SmartLab 批量入口均设置为 `force`，Mk01/Mk02 也允许调用，但仍受外层停滞门控。该方法尚未包含 head/tail 可行插入预筛、监督排序器、GNN/PPO、ONNX 或 GPU 推理。
 
 ### 7.4 与 L2S 的关系
 
@@ -347,7 +421,7 @@ Tabu 可通过 `HLS_TABU_RL=1` 复用当前 Greedy Actor。五类邻域仍按原
 | 从完整调度继续优化 | COPT/启发式先生成完整解，Guided 再修改机器分配和顺序 | Guided 不负责从空调度逐道构造解 |
 | 从关键路径选择待移动工序 | 使用全部零松弛工序，停滞后加入小正松弛工序 | 最多轮换选择 32 道关键工序和 16 道近关键工序 |
 | N-opt2 跨机器插入 | 枚举其他兼容机器及目标机器全部插入槽位 | 未使用 L2S 的 `findLandR` head/tail 插入区间预筛 |
-| 策略提出多个动作后精确择优 | 规则分数分层选择 Top-48，再以 HLS 调度图精确计算 makespan | 规则分数只负责缩小候选集，不代替真实目标评价 |
+| 策略提出多个动作后精确择优 | 规则分数分层选择 Top-K，默认 48、当前批量为 96，再以 HLS 调度图精确计算 makespan | 规则分数只负责缩小候选集，不代替真实目标评价 |
 | 当前解与 incumbent 分离 | 每条轨迹保存 `current` 和 `best`，外层另存 `output_schedule` | 允许有限等值和受控变差移动，但返回值不会劣于输入及轨迹最好解 |
 | 多初始样本和持续迭代 | 工作解与精英解注入最多 6 条持久轨迹，按 round-robin 推进 | 停滞 10 次回滚到该轨迹最好解 |
 | 状态-动作历史记忆 | 最近 128 个调度签名、动作频率惩罚及每 20 次调用衰减 | 尚无 L2S 的状态向量、kNN 检索和动作软投票 |
@@ -380,119 +454,192 @@ Tabu 仅为最终选中候选构造完整图
 
 `ScheduleItemsToGraph(..., flag=true)` 可同时设置图、工序列表、makespan 和故障率。稀疏求值器不改变目标定义：每条工件弧和机器弧的权重仍是源工序在当前机器上的加工时间；最终选中的 Greedy/Tabu 调度、遗传解码、COPT 解和启发式初始解仍通过完整 `Schedule` 图确认。开发验证开关会对同一候选同时执行稀疏与稠密求值，两者不一致时抛出异常，而不是继续搜索。
 
-## 9. 参数与实验输出
+## 9. 参数、运行入口与实验输出
 
-单次运行的主要参数默认值为：
-
-| 参数 | 默认值 | 作用 |
-| --- | ---: | --- |
-| `search_mode_param` | `0.5` | 遗传/禁忌相对于贪心的初始偏好 |
-| `random_search_strategy_param` | `0.5` | 遗传/禁忌初始偏好中遗传搜索所占比例 |
-| `max_repeat_count` | `100` | 所有当前启用搜索方法均未改进的完整轮数上限 |
-| `max_iter_count` | `30` | 单次调用的基准迭代数，强化和贪心调用自动缩短 |
-| `population_size` | `20` | 遗传搜索种群大小 |
-| `tabu_list_length` | `25` | 动态禁忌期限的配置值，设为 0 可关闭禁忌限制 |
-| `copt_time_limit_seconds` | `300` | COPT 初始解时间限制 |
-| `total_time_limit_seconds` | `3600` | COPT 加 HLS 总时间限制 |
-| `random_seed` | 当前 Unix 时间（秒） | 调度器、遗传、禁忌及启发式多起点的根随机种子 |
-
-非位置参数环境变量 `HLS_ENABLE_GUIDED_SEARCH` 控制第四方法。程序启动时输出 `guided_search_enabled` 和 `operation_count`，用于确认规模门槛和环境变量最终选择的执行路径。
-
-`run_uniform_rl_experiments.sh` 是当前统一参数验收入口。十个实例共享 `search=0.60`、`random=0.50`、`max_repeat=1000`、`max_iter=45`、种群 32、禁忌长度 30、COPT 300 秒和总时限 3600 秒；Greedy RL 默认 Top-K 256，Tabu RL 默认 Top-K 1024，每类 Tabu 邻域至少保留 24 个候选，不按实例名称或规模切换 profile。方法加成、Guided Top-K、Greedy/Tabu Top-K、分邻域最低配额以及两者的规则/探索比例都可由全局环境变量统一覆盖，并写入 `best-config.env`。脚本首次运行从 `/dev/urandom` 一次性生成十个独立 seed，最大并发数限制为 5，并输出原始日志、结果、L2S 对比和完整复现配置。提供已有 `SEEDS_FILE` 时只用于复现实验，不重新抽取或替换单个实例 seed。
-
-Greedy PPO 邻域筛选使用以下全局环境变量：
-
-| 环境变量 | 默认值 | 作用 |
-| --- | ---: | --- |
-| `HLS_GREEDY_RL` | `0` | 请求启用 Greedy RL；默认保持原始 Greedy |
-| `HLS_GREEDY_RL_MODEL` | `rl_greedy/models/greedy_policy.txt` | C++ Actor 文本权重路径 |
-| `HLS_GREEDY_RL_TOP_K` | `96` | 动态扩展前的候选基数 |
-| `HLS_GREEDY_RL_DYNAMIC_TOP_K` | `1` | 按工序数自动扩展到至少 96/192/256/384 |
-| `HLS_GREEDY_RL_RULE_FRACTION` | `0.25` | 候选池中由原 Greedy 规则保底的比例 |
-| `HLS_GREEDY_RL_FALLBACK_ON_MISS` | `1` | RL 三阶段无可接受解时补跑原始 Greedy 步骤 |
-| `HLS_GREEDY_RL_TEMPERATURE` | `1.0` | 探索采样 softmax 温度，限制为 0.05～20 |
-| `HLS_GREEDY_RL_EXPLORATION` | `0.15` | Top-K 中概率采样席位比例，限制为 0～0.5 |
-
-启动日志输出 `greedy_rl_requested`、`greedy_rl_enabled`、模型路径和加载状态；运行结束时 `Greedy RL summary` 汇总策略调用、生成动作和入选动作数量。批量脚本直接继承这些环境变量，无需增加位置参数。
-
-Tabu 模型复用使用独立环境变量：
-
-| 环境变量 | 默认值 | 作用 |
-| --- | ---: | --- |
-| `HLS_TABU_RL` | `0` | 是否启用 Tabu RL 筛选 |
-| `HLS_TABU_RL_MODEL` | 继承 Greedy 模型路径 | 当前复用的 Actor 权重 |
-| `HLS_TABU_RL_TOP_K` | `256` | 动态扩展前的候选基数 |
-| `HLS_TABU_RL_DYNAMIC_TOP_K` | `1` | 按工序数扩展到至少 256/384/512/768 |
-| `HLS_TABU_RL_RULE_FRACTION` | `0.30` | 原 Tabu 规则候选比例 |
-| `HLS_TABU_RL_EXPLORATION` | `0.20` | 概率探索比例 |
-| `HLS_TABU_RL_MIN_PER_NEIGHBORHOOD` | `16` | 五类非空邻域各自最低保留数 |
-| `HLS_TABU_RL_FALLBACK_ON_MISS` | `1` | 无可接受候选时评价未入选动作 |
-
-启动日志和 `Tabu RL summary` 分别记录模型状态，以及生成/选择候选、各来源候选、邻域配额补充和 fallback 次数。
+### 9.1 主程序参数与统一批量配置
 
 命令行位置参数依次为：
 
 ```text
-./build/production_scheduling input_file search_mode random_strategy \
+./build/optimized/production_scheduling input_file search_mode random_strategy \
   max_repeat max_iter population_size tabu_length copt_seconds total_seconds random_seed
 ```
 
-主程序只显式检查总时间 `total_time_limit_seconds > 0`；COPT 自身校验时间必须为有限正数，错误被外层异常捕获时会尝试启发式回退。设置 `copt_time_limit_seconds = total_time_limit_seconds` 意味着 COPT 可能耗尽 HLS 的全部时间，不能据此评价后续搜索方法的优化能力。
+| 参数 | C++ 默认值 | 当前 SmartLab 批量值 | 作用 |
+| --- | ---: | ---: | --- |
+| `search_mode_param` | 0.5 | 0.60 | 遗传/禁忌相对于 Greedy 的初始偏好 |
+| `random_search_strategy_param` | 0.5 | 0.50 | 上述初始偏好中分给 GA 的比例 |
+| `max_repeat_count` | 100 | 1000 | 无全局改进完整轮数的停止阈值 |
+| `max_iter_count` | 30 | 45 | 单次方法调用的基准迭代数，见第 5 节预算表 |
+| `population_size` | 20 | 32 | GA 目标种群大小 |
+| `tabu_list_length` | 25 | 30 | 动态禁忌期限的配置值 |
+| `copt_time_limit_seconds` | 300 | 0 | 初始 COPT 预算，不控制 Greedy 联合修复 |
+| `total_time_limit_seconds` | 3600 | 3600 | 初始解及全部 HLS 阶段共用的优化秒数 |
+| `random_seed` | 当前 Unix 时间秒数 | 每个任务独立随机的 32 位整数 | 派生各启发式搜索随机流 |
 
-每次方法调用后输出方法名、秒数、模式（`intensification` / `adaptive` / `diversified`）、本次迭代上限及当前**全局最好** `Total time:`。结束时输出三或四种方法各自的 `calls`、`local_improvements`、`global_improvements`、累计 `relative_gain`（**局部**相对收益）和累计秒数；最后输出 `Final makespan:`、单独整数 makespan 和从 COPT 前开始的整数秒总耗时。
+`COPT_TIME`、`TOTAL_TIME` 等大写名称是 Python/脚本入口接收的变量，映射到对应 C++ 位置参数；`RUNS=10` 是每个实例独立启动 10 个进程任务，不是单次局部搜索执行 10 次。将初始 COPT 时限设为总时限，可能使其耗尽后续搜索预算，当前优化配置因此将初始 COPT 关闭。
 
-批量脚本 `run_brandimarte_experiments.sh` 默认以 **10 路并发**处理 `Mk01` 到 `Mk10`，每个实例默认 **1 次**；批量脚本中的 `RUNS` 才表示每个实例重复次数，不同于主程序单次方法调用的 `max_iter_count`。默认 `SEED_BASE=100000`，`seed = SEED_BASE + instance_index * 1000 + run_number`（run 从 1 开始）；`INSTANCES` 子集会改变 `instance_index`，比较实验时应固定实例列表与随机种子。脚本使用按 `PARALLEL_JOBS` 数量组成的批次等待，不保证两批之间无空闲。常用控制参数包括：
+当前批量配置对所有实例使用同一组参数和机制开关；不按 `MkXX` 名称指定 profile、固定 seed 或目标 makespan。结构相关的统一规则，例如关键工序排序、工作量评分和停滞阈值，仍会随当前调度状态产生不同动作。
 
-- `RUNS` / `START_RUN`：总次数及从第几次开始补跑（默认分别为 1 / 1）；补跑须使用同一个 `RUN_TIMESTAMP` 和现有日志目录。
-- `PARALLEL_JOBS`：并发进程数，默认 10；**COPT 检查脚本**单独默认 5。
-- `COPT_TIME` / `TOTAL_TIME`：每个进程的 COPT / 总优化秒数，默认 300 / 3600；分别映射主程序相应参数。
-- `SEARCH_MODE`、`RANDOM_STRATEGY`、`MAX_REPEAT`、`MAX_ITER`、`POPULATION_SIZE`、`TABU_LENGTH`、`SEED_BASE`：覆盖主程序默认算法参数。
-- `SKIP_COMPLETED=1`：已有日志含 `Final makespan:` 则跳过；`SKIP_COMPLETED=0`：重新运行并覆盖同名日志。
-- `INSTANCES` / `AGGREGATE_INSTANCES`、`DATA_DIR`、`EXECUTABLE`、`LOG_DIR`、`RESULT_FILE`、`RUN_TIMESTAMP`：限定实例集合或覆盖输入、二进制、输出路径；默认时间目录由启动时的 `date +%Y%m%d_%H%M%S` 生成。
+### 9.2 RL 参数
 
-默认输出结构如下：
+下表中数值型默认值只有在相应 RL 已启用时才生效。Tabu 默认继承 Greedy 模型路径；当前两者统一读取 `rl_greedy/models/greedy_policy_brandimarte.txt` 的快照。
 
-- `run_logs/<运行时间>/MkXX_runNN.txt`：一次运行的完整标准输出和错误输出；
-- `run_logs/<运行时间>/result.csv`：`instance,run1,...,runN`，每个实例一行。脚本一开始若文件不存在，会填入 `PENDING` 占位；全部批次成功后才从日志提取 `Final makespan:` 并用临时文件原子替换最终 CSV，运行期间不会逐次更新该文件；
-- `copt.csv`：`collect_copt_results.sh` 根据 `LOG_DIR` 和 `RUNS` 提取 COPT 初始 makespan，默认 `LOG_DIR` 为顶层 `run_logs/`，若日志位于时间目录须显式设置该变量；
-- `copt_progress_checks/copt_progress.csv`：`check_copt_initial_solution.sh` 汇总的逐实例逐检查点记录，脚本写出字段 `instance,checkpoint_seconds,makespan,observed_elapsed_seconds,status`；现有文件若经过人工横向重排，不代表脚本原生的 CSV 结构；
-- `copt_progress_checks/copt_final_results.csv`：`instance,final_makespan,status,copt_elapsed_seconds,log_file,progress_file`，对应 COPT 可行解或 `NA`；原始 incumbent 流另写到同目录 `logs/<instance>_incumbents.csv`，按 `elapsed_seconds,makespan` 记录。
+| C++ 环境变量 | C++ 默认值 | 当前批量值 |
+| --- | --- | --- |
+| `HLS_GREEDY_RL` / `HLS_TABU_RL` | 0 / 0 | 1 / 1 |
+| `HLS_GREEDY_RL_MODEL` | `rl_greedy/models/greedy_policy.txt` | Brandimarte Actor 快照 |
+| `HLS_TABU_RL_MODEL` | 继承 Greedy 路径 | 同一 Actor 快照 |
+| `HLS_GREEDY_RL_TOP_K` / `HLS_TABU_RL_TOP_K` | 96 / 256 | 256 / 1024 |
+| `HLS_GREEDY_RL_DYNAMIC_TOP_K` / `HLS_TABU_RL_DYNAMIC_TOP_K` | 1 / 1 | 0 / 0 |
+| `HLS_GREEDY_RL_RULE_FRACTION` / `HLS_TABU_RL_RULE_FRACTION` | 0.25 / 0.30 | 0.30 / 0.30 |
+| `HLS_GREEDY_RL_EXPLORATION` / `HLS_TABU_RL_EXPLORATION` | 0.15 / 0.20 | 0.20 / 0.25 |
+| `HLS_GREEDY_RL_TEMPERATURE` / `HLS_TABU_RL_TEMPERATURE` | 1 / 1 | 1 / 1 |
+| `HLS_GREEDY_RL_FALLBACK_ON_MISS` / `HLS_TABU_RL_FALLBACK_ON_MISS` | 1 / 1 | 1 / 1 |
+| `HLS_GREEDY_RL_VERIFY_WITH_BASELINE` | 0 | 0 |
+| `HLS_TABU_RL_VERIFY_FULL_NEIGHBORHOOD` | 0 | 0 |
+| `HLS_TABU_RL_MIN_PER_NEIGHBORHOOD` | 16 | 24 |
+| `HLS_TABU_RL_FALLBACK_ON_NON_IMPROVEMENT` | 0 | 0；仍保留第 7.2 节的方法最好值补评 |
 
-`check_copt_initial_solution.sh` 默认每个实例 COPT 运行 3600 秒，每隔 300 秒从回调记录中取不晚于该检查点的最近 incumbent，最多 5 个实例并发；通过监听 `COPT initial makespan:` 或 `COPT initial solution unavailable:` 提前停止后续 HLS，使输出只反映 COPT。该脚本为分析初始解的独立实验，不能把回退 HLS 的 makespan 充作 COPT incumbent。
+启动日志输出两种 RL 的 requested/enabled、模型路径及加载状态，结束时输出 `Greedy RL summary`、`Tabu RL summary` 的候选生成、筛选和回退统计。批量调度器要求进程退出码为 0、存在 `Final makespan:`，且日志确认两种 RL 均成功启用，才将该任务记为 `OK`；不能将加载失败后的规则回退混入“开启 RL”的成功结果。
 
-如果 COPT 没有产生可行 incumbent，日志会包含 `COPT initial solution unavailable:`，对应的 `copt.csv` 单元格记为 `NA`；此时日志中的 `HLS fallback initial makespan` 属于回退解，不属于 COPT 初始解。
+### 9.3 优化机制开关
 
-## 10. 最新十次实验与 L2S 对比
+| 环境变量 | C++ 默认路径 | 当前批量配置 |
+| --- | --- | --- |
+| `HLS_ENABLE_GUIDED_SEARCH` | 按总工序数至少 80 自动启用 | `force`，所有实例允许调用 |
+| `HLS_GUIDED_TOP_K` | 48 | 96 |
+| `HLS_DISPATCH_INITIAL` | 关闭 | 1 |
+| `HLS_GREEDY_FLEXIBLE_REPAIR` | 关闭 | 1 |
+| `HLS_GREEDY_REPAIR_RELAYS` | 关闭 | 1 |
+| `HLS_GREEDY_RELEASE_COUNT` / `HLS_GREEDY_REPAIR_SECONDS` | 修复接口 24 / 3 | 扩展模式 32 / 8；标准模式固定 24 / 3 |
+| `HLS_GREEDY_COPT_REPAIR` | 关闭 | 0 |
+| `HLS_GA_WORKLOAD_REDISTRIBUTION` | 关闭 | 1 |
+| `HLS_GA_ACTIVE_DECODE` | 关闭 | 0 |
+| `HLS_GA_LOCAL_RESTART` | 关闭 | 0 |
+| `HLS_TABU_CONTINUOUS_TRAJECTORY` | 关闭，扰动默认 2～5 步 | 1，扰动默认 5～10 步 |
+| `HLS_ENABLE_RESTARTS` | 关闭 | 1 |
+| `HLS_RESTART_STAGNATION_CALLS` | 40 | 16 |
+| `HLS_TARGET_MAKESPAN` | 0 | 0，不设置实例专属目标 |
 
-最新完整实验位于 `run_logs/20260922_122032/`：Mk01～Mk10 各运行 10 次，每次 COPT 上限 300 秒、COPT 加 HLS 总时限 3600 秒。L2S 数据取自 `/home/luopw24/L2S-FJSP/result.csv` 的对应十次结果。表中差值为 `HLS 均值 - L2S 均值`，负值表示 HLS 更好。
+四种方法额外的 `HLS_*_SCORE_BONUS` 在当前批量配置中均为 0，自适应控制器仍使用第 5 节的统一评分公式。
 
-该轮实验早于 Greedy PPO 模块，使用的是 `HLS_GREEDY_RL=0` 等价路径，不能用于评价新策略。当前仅完成小规模训练、导出、加载和搜索闭环验证；正式效果需要训练独立模型后，以相同 seed、COPT 起点和总时限进行 RL 开/关配对实验。
+`run_smartlab_hls.py` 通过 `run_adaptive_brandimarte.py::Runner` 启动任务：先清除父进程继承的全部 `HLS_*`，再按已保存参数构造统一环境，最后叠加脚本内固定的 `EXPERIMENT_ENV`。因此，仅在命令前设置任意 `HLS_*` 不会覆盖当前批量方案。可调的统一参数应使用脚本支持的 `SEARCH_MODE`、`MAX_ITER`、`GREEDY_RL_TOP_K`、`TABU_RL_EXPLORATION` 等名称；新增算法开关应修改配置生成处并留存清单。`run_optimized_hls.sh` 的候选实验入口另支持 `CANDIDATE_HLS_ENV`，与 SmartLab 入口不同。
 
-| 实例 | HLS 最好 | HLS 均值 | HLS 最差 | L2S 最好 | L2S 均值 | L2S 最差 | 均值差 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Mk01 | 40 | 40.0 | 40 | 40 | 40.9 | 42 | -0.9 |
-| Mk02 | 27 | 28.8 | 30 | 27 | 27.6 | 28 | +1.2 |
-| Mk03 | 204 | 204.0 | 204 | 204 | 204.0 | 204 | 0.0 |
-| Mk04 | 61 | 65.4 | 67 | 62 | 63.9 | 65 | +1.5 |
-| Mk05 | 173 | 178.6 | 181 | 173 | 173.1 | 174 | +5.5 |
-| Mk06 | 63 | 64.6 | 68 | 71 | 72.1 | 74 | -7.5 |
-| Mk07 | 142 | 146.5 | 153 | 141 | 142.4 | 143 | +4.1 |
-| Mk08 | 523 | 523.0 | 523 | 523 | 523.0 | 523 | 0.0 |
-| Mk09 | 307 | 315.0 | 326 | 315 | 316.5 | 320 | -1.5 |
-| Mk10 | 216 | 220.5 | 224 | 214 | 215.8 | 217 | +4.7 |
+### 9.4 数据集、程序与模型快照
 
-十个实例的“各实例十次均值”再平均后，HLS 为 `178.64`，L2S 为 `177.93`，HLS 高 `0.71`，约差 `0.4%`。按实例均值计，HLS 胜 3 个、平 2 个、负 5 个；按各实例最好值计，HLS 胜 3 个、平 5 个、负 2 个。Mk04 和 Mk09 能找到优于 L2S 最好值的方案，但波动较大；Mk05、Mk07 和 Mk10 的均值仍是主要差距，Mk06 则稳定明显优于当前 L2S 结果。
+`run_smartlab_hls.sh` 调用 `run_smartlab_hls.py`，默认从 `datasets/SmartLab_Challenge_2020` 自动发现全部实例，按自然顺序排序：Brandimarte 10 个、Barnes 21 个、Dauzere 18 个，合计 49 个；默认每个 10 次，共 490 个任务。`--families brandimarte` 可只创建 100 个任务。
 
-100 次独立 HLS 运行中，Mk01/Mk02 因工序数小于 80 未启用 Guided，其余 80 次运行启用。Guided 合计调用 9736 次、刷新全局最好 92 次、累计方法时间约 4685.7 秒；该时间是不同进程和不同运行的方法耗时之和，不是整批实验的墙钟时间。两仓库实验的初始解生成方式、并发资源和完整时间口径尚未严格对齐，因此该表说明当前解质量和稳定性，不能单独证明 HLS 或 L2S 在等计算预算下更优。
+程序优先选择 `build/optimized/production_scheduling`，缺失时回退 `build/production_scheduling`，也可用 `EXECUTABLE` 显式指定。二进制是否包含最新实现要以来源和 SHA-256 为准，不能仅凭环境开关判断。模型通过 `MODEL_PATH` 指定，默认是已训练的 Brandimarte Actor。创建批次时将二进制、模型、全部实例和 L2S 对比数据复制到 `inputs/`，并记录来源及校验值，之后各任务使用快照。
+
+C++ 模型推理在 CPU 上执行，不要求激活 GPU 环境；Python 调度入口要求 Python 3.8 以上，shell 启动器优先使用 `~/miniconda3/bin/python`，也可设置 `PYTHON`。Greedy 联合修复仍需要有效 COPT 动态库和许可证，即使初始 `COPT_TIME=0` 也是如此。
+
+### 9.5 随机种子与恢复
+
+创建批次时使用 `secrets.randbits(32)` 为每个任务生成随机 seed，提前写入 `seeds.csv` 和 `state.json`，同批次出现重复则重抽，除此之外不根据 makespan 挑选 seed。算法根 seed 不按实例固定；不同实例共享相同参数，使用各自独立随机流。
+
+`--resume --log-dir <原目录>` 校验输入快照并恢复原清单，跳过已成功任务，用原 seed 重试未完成任务；旧尝试日志移入 `attempts/`。恢复不会给已创建的 600 秒任务改成 3600 秒，旧参数由 `config.json` 决定。改变时限或方案应新建批次，避免混合口径。`run_optimized_hls.sh` 的 `PAIRED_SEEDS_FILE` 可显式重放已有种子，用于配对对照，不是默认新实验的种子生成方式。
+
+### 9.6 根据资源动态调度
+
+并行单位是独立实例/重复运行的进程，不是在一个 HLS 轨迹内部并行。任务按“系列→实例→run”进入共享队列；空位按资源检查补充，同一实例的多个 run 可以同时运行，不按固定 5 个或 10 个任务整批等待。
+
+资源探测读取 CPU affinity、cgroup v1/v2 的 CPU 配额与内存上限、主机可用内存，以及进程组 CPU/RSS；使用实际配额而非直接把宿主机逻辑 CPU 总数作为容量。主要默认配置为：
+
+| 调度参数 | 默认值 | 含义 |
+| --- | ---: | --- |
+| `MAX_PARALLEL` | 14 | 总并发上限，实际可低于该值 |
+| `CPUS_PER_JOB` | 1 | 每个任务绑定的逻辑 CPU 数 |
+| `CPU_USAGE_LIMIT` / `CPU_RESERVE` | 0.95 / 0 | 目标 CPU 容量比例 / 额外预留核数 |
+| `JOB_MEMORY_GB` | 2 | 单任务初始内存估计，之后至少为观测峰值的 1.25 倍 |
+| `MEMORY_RESERVE_GB` | 4 | 实际预留取该值与有效内存上限 10% 的较大者 |
+| `CHECK_INTERVAL` | 5 秒 | 重新采样资源、决定准入与输出进度的间隔 |
+| `RAMP_UP` | 2 | 每次检查最多新增任务数 |
+| `TIMEOUT_GRACE` | 120 秒 | 总算法时限之外的进程级看门狗宽限 |
+
+CPU 准入扣除其他进程的观测占用；内存准入同时预留正在运行任务可能继续增长的空间。运行槽位不足时减少新任务准入，不因配额暂时下降就杀掉已有任务。每个任务绑定本启动器内未被其他活跃任务使用的 CPU；这不构成跨多个独立启动器的全局 CPU 排他锁。单线程 COPT 修复也受进程 affinity 限制。
+
+超过 `TOTAL_TIME + TIMEOUT_GRACE` 的任务先对其进程组发送 SIGTERM，3 秒后仍未退出才 SIGKILL，记录为超时。Ctrl-C 会停止本次启动器拥有的进程组，保存已完成结果和原种子，供后续恢复；失败或未完成任务不作为数值参与最终统计。
+
+### 9.7 日志、CSV 与十分钟进程报告
+
+默认日志目录为 `run_logs/smartlab_<运行时间>/`。时间目录由进程的 `TZ` 决定；需要北京时间目录时在命令前指定 `TZ=Asia/Shanghai`。主要文件如下：
+
+| 文件 | 内容与更新方式 |
+| --- | --- |
+| `brandimarte__Mk01_run01.txt` 等 | 单次任务完整标准输出、错误和最终退出/耗时信息 |
+| `config.json`、`inputs/` | 固定算法参数、机制开关、快照来源及 SHA-256 |
+| `seeds.csv`、`state.json` | 原始随机 seed、每项任务状态、尝试次数、PID 与结果 |
+| `result.csv` | 每个实例一行、每次运行一列，实例键使用 `family::label`，运行中保留状态占位 |
+| `details.csv` | 每次任务的 seed、makespan、状态、耗时等明细 |
+| `summary.csv` | 成功次数、最好/均值/最差等统计与 L2S 对比；未完成时是部分结果 |
+| `scheduler.log`、`scheduler.csv`、`status.md` | 调度事件、CPU/内存与并发进度、便于查看的状态摘要 |
+| `processes_10min.csv` | 每约 600 秒记录一次当前活跃优化进程快照 |
+
+当前批量入口还持续更新仓库根目录的 `HLS_brandimarte.csv`、`HLS_barnes.csv`、`HLS_dauzere.csv`，格式均为 `instance,run1,...,run10`；用 `OUTPUT_DIR` 可统一改变这些文件的外层目录。结果随任务状态改变写出，系列 CSV 也在资源报告时更新，采用临时文件原子替换，不必等整批结束。它们与各日志目录内部的 `result.csv` 是不同层级的汇总。
+
+十分钟报告同时写入控制台/`scheduler.log` 和 `processes_10min.csv`，包括 PID、系列、实例、run、运行秒数、累计 CPU 秒数、RSS 和绑定 CPU；CSV 另外保存 seed 及状态。CPU 秒数是累计值，不是瞬时利用率；整体 CPU 利用率见调度报告。报告由默认 5 秒检查循环触发，因此允许数秒延迟。
+
+新批次遇到同名外层 CSV 默认拒绝覆盖；显式 `OVERWRITE_OUTPUT=1` 才允许替换。更适合重复实验的做法是分配新的 `OUTPUT_DIR` 和日志目录。SmartLab 入口没有跨启动器的同目标写入锁，不要让两个批次同时写同一组外层 CSV。
+
+仅重跑 Brandimarte 10 个实例、各 10 次、每次 3600 秒的示例命令如下，创建新的外层结果目录：
+
+```bash
+cd /home/luopw24/HLS && TZ=Asia/Shanghai COPT_HOME="$HOME/copt80" COPT_LICENSE_DIR="$HOME/copt80" LD_LIBRARY_PATH="$HOME/copt80/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" RUNS=10 COPT_TIME=0 TOTAL_TIME=3600 MAX_PARALLEL=14 OUTPUT_DIR="/home/luopw24/HLS/results/brandimarte_$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S)" ./run_smartlab_hls.sh --families brandimarte
+```
+
+### 9.8 历史入口及 COPT 独立检查
+
+`run_uniform_rl_experiments.sh` 是此前统一参数单轮入口，`run_brandimarte_experiments.sh` 是更早的固定并发/序列 seed 入口，不能用它们的默认值解释当前 SmartLab 实验。`run_best_rl_experiments.sh` 保留过按实例 profile 和 seed 重放的历史方案，不属于当前统一随机种子方案。`run_optimized_hls.sh` 用于 600 秒固定版本验证，默认只测 Brandimarte；`run_smartlab_hls.sh` 是当前 3600 秒、多系列动态并发入口。
+
+`check_copt_initial_solution.sh` 仍是独立的初始解检查：默认每实例 COPT 3600 秒、最多 5 个并发，每 300 秒提取最近 incumbent，并在 COPT 阶段结束后停止后续 HLS。输出 `copt_progress_checks/copt_progress.csv`、`copt_final_results.csv` 和原始 `logs/<instance>_incumbents.csv`；原生进度表是 `instance,checkpoint_seconds,makespan,observed_elapsed_seconds,status`，历史人工横向整理不改变脚本格式。`collect_copt_results.sh` 从指定 `LOG_DIR` 提取初始 COPT 结果到 `copt.csv`。没有 COPT incumbent 时写 `NA`，不能把 `HLS fallback initial makespan` 算作 COPT 解。
+
+每次主程序方法调用后输出方法名、耗时、模式、迭代上限及全局最好 `Total time:`；结束时输出各方法调用/局部改进/全局改进次数、累计局部相对收益和方法秒数，阶段重启前后的统计累加。最后的 `Final makespan:` 是批量脚本提取结果的依据，单独输出的整数耗时来自初始 COPT 前的计时点。
+
+## 10. 已记录的 Brandimarte 结果与 L2S 对比
+
+### 10.1 当前 3600 秒批次
+
+截至本次文档核对，仓库外层 `HLS_brandimarte.csv` 包含 Mk01～Mk10 各 10 个数值结果，来源批次为 `run_logs/smartlab_20261013_173155/`，参数清单是该目录下的 `config.json`。每次总优化 3600 秒，初始 COPT 0 秒，两种 RL 均启用，使用第 9 节统一配置及独立随机 seed。下面只统计已经完成的 Brandimarte 100 次，不表示同批 Barnes/Dauzere 的全部任务也已完成。
+
+L2S 对照采用当前 `l2s_brandimarte.csv`，不再引用早期 `/home/luopw24/L2S-FJSP/result.csv`。差值为 `HLS 均值 - L2S 均值`，负值表示 HLS 的 makespan 更小：
+
+| 实例 | HLS 最好 | HLS 十次均值 | HLS 最差 | L2S 十次均值 | 均值差 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Mk01 | 40 | 40.00 | 40 | 40.90 | -0.90 |
+| Mk02 | 26 | 26.20 | 27 | 27.40 | -1.20 |
+| Mk03 | 204 | 204.00 | 204 | 204.00 | 0.00 |
+| Mk04 | 60 | 60.00 | 60 | 63.50 | -3.50 |
+| Mk05 | 173 | 173.00 | 173 | 173.20 | -0.20 |
+| Mk06 | 60 | 61.30 | 63 | 70.70 | -9.40 |
+| Mk07 | 139 | 140.00 | 141 | 141.40 | -1.40 |
+| Mk08 | 523 | 523.00 | 523 | 523.00 | 0.00 |
+| Mk09 | 307 | 307.00 | 307 | 317.70 | -10.70 |
+| Mk10 | 205 | 207.60 | 211 | 214.90 | -7.30 |
+
+十个实例的十次均值等权平均，HLS 为 **174.21**，L2S 为 **177.67**，降低 **3.46，约 1.95%**；这是总体均值之比，不是逐实例相对降幅的平均。按实例均值计 8 个更好、2 个持平、0 个更差。Mk02 有 8 次为 26、2 次为 27；Mk04/Mk05 各十次分别全为 60/173。Mk03=204、Mk08=523 是已知最优值，当前两种方法均达到，不能要求在这些实例上严格低于该值。
+
+### 10.2 已完成的 600 秒固定版本验证
+
+`codex_runs/20261013_deadline_optimization/final-100-600/` 的 100 次验证已完成，并非仍在运行；冻结报告 `codex_runs/20261013_deadline_optimization/final/final-report.md` 记录结束时间为 **2026-10-14 00:53:09（UTC+8）**。该批各实例十次均值依次为：
+
+```text
+Mk01 40.00   Mk02 26.70   Mk03 204.00   Mk04 60.50   Mk05 173.00
+Mk06 63.20   Mk07 141.10  Mk08 523.00   Mk09 307.00  Mk10 208.80
+```
+
+该批总体平均 **174.73**，对照同一份 L2S 的 **177.67**，也是 8 个更好、2 个持平。冻结版本提交为 `bbe1b82231f2794a7b851f01bd8df612c9f82b86`。3600 秒批次清单中的程序 SHA-256 为 `a59024ea64967dae667408054ecf62acbf7f39648393912eb94480baf7e8c974`，模型 SHA-256 为 `37d0aa8d6b12d512a67debb55071f6b88edcfbefa0eddabd06ca8fbfdb81f67e`，与冻结验证所用版本对应。
+
+600 秒与 3600 秒两批分别保留原始记录，不能拼接各自最好 run 组成新的一组十次结果。表格比较的是现有实验的解质量；L2S 的 400 次迭代与 HLS 的秒数预算不是相同口径，资源和完整墙钟时间也须另行对齐，不能据此宣称等算力优势，或把全部改善单独归因于 RL、联合修复等某一模块。
 
 ## 11. 当前实现的边界
 
-1. 当前最终目标是 makespan，机器故障率只被记录和计算，不参与主目标的加权优化。
-2. 自适应收益统计只在单次程序运行内保留，不会跨越不同随机种子或实例学习参数。
-3. 方法耗时和截止控制使用单调高精度时钟；最终兼容输出的总耗时仍按整数秒显示。
-4. COPT 是初始解生成器；当实例较大或时间较短而 COPT 没有可行解时，程序会自动回退到启发式初始解，后续 HLS 仍可继续运行。
-5. 当前 Greedy/Tabu 的候选多次复制调度并重建稠密图，尚无增量 makespan、统一的跨方法候选缓存或并行单实例搜索；批量脚本的并行是**不同进程/实验之间**的并行。
-6. 精英库仅按签名去重且按加入顺序淘汰旧项；外层接纳等 makespan 工作解时只检查与现有工作解签名不同，**不**再次比较 Greedy 的结构次目标。遗传的结构距离筛选只用于种群，外层库没有基于距离的全局维护策略。
-7. `Guided Insertion` 已实现规则候选排序、多轨迹和轻量访问记忆，但尚未与 Greedy/Tabu 提取统一公共候选引擎，也没有 L2S 的 head/tail 安全预筛、近邻向量检索和学习模型。未经同实例、同总时限、同并发和同随机种子的实验，不应把其他仓库的 makespan 与 HLS 结果直接归因于某个邻域机制。
-8. Greedy PPO 当前使用手工动作特征和小型 MLP，尚未编码完整调度图；监督排序、规则保底和动态 Top-K 用于降低召回损失，但仍需重新训练并在 Mk01～Mk10 上验证是否优于原始 Greedy。模型训练和比较必须计入训练数据隔离以及总时间预算。
-9. Tabu RL 当前直接复用 Greedy Actor，只能视为候选提议器；模型训练目标没有覆盖禁忌期限、aspiration 和受控变差的长期回报。正式默认启用前应训练独立 Tabu 模型，并做原始 Tabu、模型筛选和规则保底的消融实验。
+1. 最终优化目标仍只有 makespan；机器故障率只记录和计算，不参与主目标。一般输出是给定时间内的最好可行解，不附带原问题全局最优证明。
+2. 自适应控制器在当前进程的当前阶段内更新方法收益，阶段重启后重新开始统计，历史阶段总量用于最终报告；它不是学习型外层调度器，也不跨运行学习。
+3. RL 只筛选 Greedy/Tabu 邻域，不预测最终 makespan、不选择外层方法、不替代禁忌准则。两种搜索复用同一个手工特征 MLP，尚无专门 Tabu 长期回报策略或完整调度图 GNN。
+4. COPT 同时承担可选初始解求解和 Greedy 有界联合修复。当前批量入口只关闭前者；许可证失效会使修复无法发挥作用，必须结合日志判断实际路径。
+5. Greedy/Tabu 已使用稀疏精确拓扑评价降低稠密建图开销，但候选仍可能复制机器序列；尚无完整增量 makespan 评价、跨方法统一候选缓存或单实例轨迹并行。Guided 仍对入选候选构造完整图。
+6. 联合 COPT 模型已有合法 head/tail 界限；Greedy/Tabu/Guided 的通用跨机插入区间预筛仍未实现。不能把子模型界限描述为全搜索引擎已具备 L2S 插入预筛。
+7. 精英库按签名去重、按加入顺序淘汰；接纳与全局最好等 makespan 的工作解时不重新比较 Greedy 的结构次目标。GA 种群距离筛选不等同于外层精英库距离维护。
+8. 所有阶段共享总优化截止时间，但使用协作式截止检查；小幅超时由收尾产生，进程级超时由批量看门狗兜底。并发资源控制只调节独立实验准入，不会自动提高单条搜索的算法质量。
+9. 当前重复实验使用统一参数和随机 seed，不属于按实例固定 seed 的结果；但算法确实参考过 Brandimarte 历史结果进行优化，十次结果也不能保证所有新 seed 都得到相同值。RL 单独贡献、各新机制贡献及跨系列泛化需要独立的配对消融与重复验证。
