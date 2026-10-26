@@ -36,7 +36,10 @@ public:
         double search_mode_preference,
         double genetic_preference,
         unsigned int random_seed,
-        bool guided_search_enabled = true
+        bool guided_search_enabled = true,
+        bool route_aware_selection = false,
+        std::array<bool, 4> enabled_methods = {true, true, true, true},
+        bool adaptive_selection_enabled = true
     );
 
     SearchDecision Select(int stagnation_count, double remaining_fraction);
@@ -71,6 +74,8 @@ private:
     std::mt19937 random_engine_;
     int total_calls_ = 0;
     bool guided_search_enabled_ = true;
+    std::array<bool, 4> enabled_methods_{true, true, true, true};
+    bool adaptive_selection_enabled_ = true;
 };
 
 const char *SearchMethodName(SearchMethod method);

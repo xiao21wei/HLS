@@ -21,6 +21,7 @@
 
 #include "DataProc.h"
 #include "CoptInitialSolution.h"
+#include "RouteRepairProfile.h"
 #include "GreedyRlPolicy.h"
 
 namespace {
@@ -788,6 +789,60 @@ std::vector<std::string> RankCriticalProcesses(
     return result;
 }
 
+std::vector<std::string> ExpandRepairProcessesWithJobNeighbors(
+    const std::vector<std::string> &ranked_processes,
+    const std::vector<Job> &jobs
+) {
+    const auto job_id_map = BuildJobIdMap(jobs);
+    std::vector<std::string> expanded;
+    std::unordered_set<std::string> seen;
+    const int anchor_count = std::min(
+        6,
+        static_cast<int>(ranked_processes.size())
+    );
+    expanded.reserve(ranked_processes.size() + anchor_count * 4);
+    for (int anchor = 0; anchor < anchor_count; ++anchor) {
+        const auto parsed = ParseProcessKey(ranked_processes[anchor]);
+        if (!parsed.has_value() || !job_id_map.contains(parsed->first)) {
+            continue;
+        }
+        const auto &processes = job_id_map.at(parsed->first)->get_job_process();
+        int process_index = -1;
+        for (int index = 0; index < static_cast<int>(processes.size()); ++index) {
+            if (!processes[index].process_item.empty() &&
+                processes[index].process_item.front().process_id ==
+                    parsed->second) {
+                process_index = index;
+                break;
+            }
+        }
+        auto append = [&](const int index) {
+            if (index < 0 || index >= static_cast<int>(processes.size()) ||
+                processes[index].process_item.size() <= 1) {
+                return;
+            }
+            const std::string key = BuildProcessKey(
+                parsed->first,
+                processes[index].process_item.front().process_id
+            );
+            if (seen.insert(key).second) {
+                expanded.push_back(key);
+            }
+        };
+        append(process_index);
+        append(process_index - 1);
+        append(process_index + 1);
+        append(process_index - 2);
+        append(process_index + 2);
+    }
+    for (const auto &key : ranked_processes) {
+        if (seen.insert(key).second) {
+            expanded.push_back(key);
+        }
+    }
+    return expanded;
+}
+
 bool EvaluateCandidate(
     const Schedule &base_schedule,
     std::vector<Schedule_item> schedule_items,
@@ -1528,6 +1583,16 @@ Schedule GreedySearch(
                 const char *relay_flag = std::getenv("HLS_GREEDY_REPAIR_RELAYS");
                 const bool use_relays = relay_flag != nullptr && std::string(relay_flag) == "1" &&
                     gRepairFailures >= 2 && gActiveCandidateWindow % 4 == 0;
+                const char *route_flag = std::getenv("HLS_GREEDY_ROUTE_REPAIR");
+                const bool use_route_neighbors = !use_relays &&
+                    route_flag != nullptr && std::string(route_flag) == "1" &&
+                    IsRouteCoupledRepairProblem(jobs);
+                if (use_route_neighbors) {
+                    repair_processes = ExpandRepairProcessesWithJobNeighbors(
+                        repair_processes,
+                        jobs
+                    );
+                }
                 if (use_relays) {
                     // Critical-only releases cannot exchange load with a busy
                     // alternative machine whose operations have positive slack.
@@ -1585,7 +1650,8 @@ Schedule GreedySearch(
                 }
                 Schedule repaired = RepairCoptFlexibleNeighborhood(
                     current_schedule, repair_processes, jobList, jobs, machines, deadline,
-                    use_relays ? 0 : 24, use_relays ? 0.0 : 3.0);
+                    use_relays ? 0 : (use_route_neighbors ? 32 : 24),
+                    use_relays ? 0.0 : (use_route_neighbors ? 5.0 : 3.0));
                 gRepairFailures = repaired.get_TotalTime() < current_schedule.get_TotalTime() ? 0 : gRepairFailures + 1;
                 if (repaired.get_TotalTime() < best_neighbor.get_TotalTime()) best_neighbor = std::move(repaired);
             }

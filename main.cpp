@@ -14,6 +14,7 @@
 #include "Order.h"
 #include "Experiment.h"
 #include "CoptInitialSolution.h"
+#include "RouteRepairProfile.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -31,6 +32,24 @@ namespace {
 
 constexpr int kMaximumOuterCalls = 100000;
 constexpr int kMaximumEliteArchiveSize = 8;
+
+bool ModuleEnabledFromEnvironment(
+    const char *name,
+    const bool default_value = true
+) {
+    const char *value = std::getenv(name);
+    if (value == nullptr) {
+        return default_value;
+    }
+    const std::string text(value);
+    if (text == "0" || text == "false" || text == "off") {
+        return false;
+    }
+    if (text == "1" || text == "true" || text == "on") {
+        return true;
+    }
+    return default_value;
+}
 
 bool GuidedSearchRequested() {
     const char *value = std::getenv("HLS_ENABLE_GUIDED_SEARCH");
@@ -372,6 +391,22 @@ int main(int argc, char *argv[]) {
     }
     const bool guided_search_enabled = GuidedSearchRequested() &&
         (GuidedSearchForced() || operation_count >= 80);
+    const std::array<bool, 4> enabled_methods{
+        ModuleEnabledFromEnvironment("HLS_ENABLE_GREEDY"),
+        ModuleEnabledFromEnvironment("HLS_ENABLE_GENETIC"),
+        ModuleEnabledFromEnvironment("HLS_ENABLE_TABU"),
+        guided_search_enabled
+    };
+    if (!enabled_methods[static_cast<int>(SearchMethod::Greedy)] &&
+        !enabled_methods[static_cast<int>(SearchMethod::Genetic)] &&
+        !enabled_methods[static_cast<int>(SearchMethod::Tabu)]) {
+        std::cerr << "At least one of Greedy, Genetic, or Tabu must be enabled."
+                  << std::endl;
+        return 1;
+    }
+    const bool adaptive_selection_enabled = ModuleEnabledFromEnvironment(
+        "HLS_ADAPTIVE_METHOD_SELECTION"
+    );
     const int target_makespan = TargetMakespanFromEnvironment();
     ConfigureGreedyRlPolicyFromEnvironment(random_seed ^ 0x27D4EB2DU);
     const GreedyRlRuntimeConfig &greedy_rl_config =
@@ -398,6 +433,17 @@ int main(int argc, char *argv[]) {
     cout << "random_seed: " << random_seed << endl;
     cout << "guided_search_enabled: "
          << (guided_search_enabled ? "true" : "false") << endl;
+    cout << "greedy_search_enabled: "
+         << (enabled_methods[static_cast<int>(SearchMethod::Greedy)]
+                 ? "true" : "false") << endl;
+    cout << "genetic_search_enabled: "
+         << (enabled_methods[static_cast<int>(SearchMethod::Genetic)]
+                 ? "true" : "false") << endl;
+    cout << "tabu_search_enabled: "
+         << (enabled_methods[static_cast<int>(SearchMethod::Tabu)]
+                 ? "true" : "false") << endl;
+    cout << "adaptive_method_selection_enabled: "
+         << (adaptive_selection_enabled ? "true" : "false") << endl;
     cout << "operation_count: " << operation_count << endl;
     cout << "target_makespan: " << target_makespan << endl;
     cout << "greedy_rl_requested: "
@@ -558,11 +604,27 @@ int main(int argc, char *argv[]) {
     input_schedule = schedule0;
     output_schedule = schedule0;
 
+    const char *route_repair_flag = std::getenv("HLS_GREEDY_ROUTE_REPAIR");
+    const bool route_repair_profile =
+        route_repair_flag != nullptr &&
+        std::string(route_repair_flag) == "1" &&
+        IsRouteCoupledRepairProblem(jobs);
+    const char *route_selection_flag = std::getenv(
+        "HLS_ROUTE_AWARE_METHOD_SELECTION"
+    );
+    const bool route_aware_selection =
+        route_repair_profile &&
+        route_selection_flag != nullptr &&
+        std::string(route_selection_flag) == "1";
+
     AdaptiveSearchController search_controller(
         search_mode_param,
         random_search_strategy_param,
         random_seed ^ 0xA511E9B3U,
-        guided_search_enabled
+        guided_search_enabled,
+        route_aware_selection,
+        enabled_methods,
+        adaptive_selection_enabled
     );
     for (const SearchMethod method : {
              SearchMethod::Greedy,
@@ -581,9 +643,14 @@ int main(int argc, char *argv[]) {
     int stagnation_call_count = 0;
     int no_improvement_round_count = 0;
     std::array<bool, 4> method_failed_since_improvement{};
-    method_failed_since_improvement[
-        static_cast<int>(SearchMethod::Guided)
-    ] = !guided_search_enabled;
+    auto mark_disabled_methods = [&](std::array<bool, 4> &values) {
+        for (int method = 0; method < 4; ++method) {
+            if (!enabled_methods[method]) {
+                values[method] = true;
+            }
+        }
+    };
+    mark_disabled_methods(method_failed_since_improvement);
     const char *restart_flag = std::getenv("HLS_ENABLE_RESTARTS");
     const bool restarts_enabled = restart_flag != nullptr &&
         std::string(restart_flag) == "1";
@@ -599,6 +666,9 @@ int main(int argc, char *argv[]) {
     int restart_count = 0;
     int phase_stagnation_calls = 0;
     std::array<bool, 3> phase_methods_seen{};
+    for (int method = 0; method < 3; ++method) {
+        phase_methods_seen[method] = !enabled_methods[method];
+    }
     std::array<SearchMethodStats, 4> completed_phase_stats{};
     cout << "hybrid_restarts_enabled: "
          << (restarts_enabled ? "true" : "false") << endl;
@@ -655,14 +725,18 @@ int main(int argc, char *argv[]) {
                 SetTabuRlSamplingSeed(phase_seed ^ 0x165667B1U);
                 search_controller = AdaptiveSearchController(
                     search_mode_param, random_search_strategy_param,
-                    phase_seed ^ 0xA511E9B3U, guided_search_enabled
+                    phase_seed ^ 0xA511E9B3U, guided_search_enabled,
+                    route_aware_selection, enabled_methods,
+                    adaptive_selection_enabled
                 );
                 phase_methods_seen.fill(false);
+                for (int method = 0; method < 3; ++method) {
+                    phase_methods_seen[method] = !enabled_methods[method];
+                }
                 phase_stagnation_calls = 0;
                 stagnation_call_count = 0;
                 method_failed_since_improvement.fill(false);
-                method_failed_since_improvement[static_cast<int>(SearchMethod::Guided)] =
-                    !guided_search_enabled;
+                mark_disabled_methods(method_failed_since_improvement);
                 ++restart_count;
                 cout << "Hybrid restart: phase=" << restart_count
                      << ", derived_seed=" << phase_seed
@@ -734,9 +808,7 @@ int main(int argc, char *argv[]) {
             stagnation_call_count = 0;
             no_improvement_round_count = 0;
             method_failed_since_improvement.fill(false);
-            method_failed_since_improvement[
-                static_cast<int>(SearchMethod::Guided)
-            ] = !guided_search_enabled;
+            mark_disabled_methods(method_failed_since_improvement);
             if (!decision.intensification) {
                 search_controller.ScheduleIntensification();
             }
@@ -763,9 +835,7 @@ int main(int argc, char *argv[]) {
                 )) {
                 ++no_improvement_round_count;
                 method_failed_since_improvement.fill(false);
-                method_failed_since_improvement[
-                    static_cast<int>(SearchMethod::Guided)
-                ] = !guided_search_enabled;
+                mark_disabled_methods(method_failed_since_improvement);
             }
         }
         search_controller.Record(
@@ -788,13 +858,16 @@ int main(int argc, char *argv[]) {
         ++count;
     }
 
-    std::vector<SearchMethod> summary_methods{
-        SearchMethod::Greedy,
-        SearchMethod::Genetic,
-        SearchMethod::Tabu
-    };
-    if (guided_search_enabled) {
-        summary_methods.push_back(SearchMethod::Guided);
+    std::vector<SearchMethod> summary_methods;
+    for (const SearchMethod method : {
+             SearchMethod::Greedy,
+             SearchMethod::Genetic,
+             SearchMethod::Tabu,
+             SearchMethod::Guided
+         }) {
+        if (enabled_methods[static_cast<int>(method)]) {
+            summary_methods.push_back(method);
+        }
     }
     for (const SearchMethod method : summary_methods) {
         SearchMethodStats stats = search_controller.GetStats(method);

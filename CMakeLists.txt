@@ -13,6 +13,8 @@ add_executable(production_scheduling main.cpp
         AdaptiveSearch.cpp
         AdaptiveSearch.h
         SearchDeadline.h
+        RouteRepairProfile.cpp
+        RouteRepairProfile.h
         Order.cpp
         Order.h
         Job.cpp
@@ -48,3 +50,25 @@ target_link_libraries(production_scheduling PRIVATE copt_cpp)
 set_target_properties(production_scheduling PROPERTIES
         BUILD_RPATH "${COPT_HOME}/lib"
         INSTALL_RPATH "${COPT_HOME}/lib")
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(test_route_repair_profile
+            tests/test_route_repair_profile.cpp
+            RouteRepairProfile.cpp
+            Job.cpp)
+    target_include_directories(test_route_repair_profile PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME route_repair_profile COMMAND test_route_repair_profile)
+
+    add_executable(test_adaptive_route_selection
+            tests/test_adaptive_route_selection.cpp
+            AdaptiveSearch.cpp)
+    target_include_directories(test_adaptive_route_selection PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME adaptive_route_selection COMMAND test_adaptive_route_selection)
+
+    add_executable(test_adaptive_method_ablation
+            tests/test_adaptive_method_ablation.cpp
+            AdaptiveSearch.cpp)
+    target_include_directories(test_adaptive_method_ablation PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME adaptive_method_ablation COMMAND test_adaptive_method_ablation)
+endif()

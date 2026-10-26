@@ -4,7 +4,7 @@
 
 本文描述实际实现，并区分默认路径和显式启用的优化开关。`l2s-design.md` 的规则候选排序、多轨迹和轻量访问记忆已以第四方法接入；Greedy/Tabu 的公共候选引擎和通用 head/tail 候选预筛仍未实现。下述联合邻域内部已经使用固定前序图的 head/tail 界限，不能将两者混为一谈。
 
-实现核对日期：2026-10-15。文档中的“C++ 默认值”指直接启动程序且未设置相应环境变量；“当前批量配置”指 `run_smartlab_hls.sh` 的统一配置，二者不能混用。
+实现核对日期：2026-10-21。文档中的“C++ 默认值”指直接启动程序且未设置相应环境变量；“当前批量配置”指 `run_smartlab_hls.sh` 的统一配置，二者不能混用。
 
 | 入口 | 可执行文件与默认时限 | 算法配置与用途 |
 | --- | --- | --- |
@@ -191,6 +191,8 @@ score = 0.40 * recent_reward + 0.25 * time_efficiency
 
 当 `calls=0` 时两个成功率均为 0。`阶段偏置` 包括：Tabu 在连续至少 5 次外层停滞后最多加 0.10，Guided 在连续至少 5 次停滞后最多加 0.15，GA 在连续至少 12 次停滞后加 0.12，剩余总时间比例不超过 10% 时 Greedy 加 0.08。固定偏置并不强制选用某一种方法。
 
+当 `HLS_ROUTE_AWARE_METHOD_SELECTION=1`、路线修复已启用且问题满足第 6.6 节结构条件时，控制器在上述统一评分上为 Greedy 加 `0.05`、为 Guided 减 `0.05`。这是对运行时方法选择的轻量偏置：Greedy、GA、Tabu、Guided 仍全部参与初始采样、冷却、探索和收益更新，单次预算不变；不匹配结构时两个修正均为 0。
+
 `search_mode_param` 给定遗传/禁忌相对于 Greedy 的初始偏好；`random_search_strategy_param` 再把该部分分给遗传与禁忌。原三方法偏好先各设至少 0.05 并在三者间归一化；Guided 单独使用 0.10 探索权重。它们**不是**固定选中概率。进入常规评分前，控制器优先让每个当前符合门控条件且调用不足 2 次的方法完成初始采样；Guided 的两次初始采样仍需先满足启用条件和停滞门槛，`force` 只绕过规模门槛。
 
 搜索阶段规则如下：
@@ -297,6 +299,15 @@ Python 评价器从同一初始解比较全邻域 Greedy 与混合 Top-K Greedy�
 3. 每台机器最多补入 3 个未重复伙伴，然后补入其他关键/近关键候选，按释放上限截断。
 
 这样可同时把关键工序迁入某台较忙机器、把接收机器上的其他工序迁出，不要求某个单独迁移先得到改善。扩展模式读取 `HLS_GREEDY_RELEASE_COUNT`（接口默认 24，范围 8～48）与 `HLS_GREEDY_REPAIR_SECONDS`（接口默认 3，范围 0.1～10 秒），当前批量入口统一设置为 32/8。最终求解时间还截断到 Greedy 调用及总优化剩余时间，强化调用中通常无法用满 8 秒。
+
+`HLS_GREEDY_ROUTE_REPAIR=1` 时，标准修复还可针对长工艺路线使用连续路线片段。该规则不读取数据集或实例名称，而是由问题结构统一判定：平均每个工件至少 18 道工序、平均每道工序至少 2 台候选机器，并且满足以下任一规模条件：
+
+- 12～16 个工件；
+- 至少 18 个工件，且平均候选机器数小于 4。
+
+触发后，以轮转结果的前 6 道关键/近关键工序为锚点，按“锚点、前后各 1 道、前后各 2 道”的顺序加入同工件柔性工序，再补入其余原候选并去重。联合模型最多释放 32 道工序、求解 5 秒。这样可以同时改变长工艺路线中相邻工序的机器分配和目标机器顺序，避免只移动单个关键工序后立即被其工件前后约束抵消。交换伙伴模式触发时仍优先使用原 relay 邻域，不叠加路线扩展。
+
+当前 SmartLab 三个系列中，结构规则只匹配 Dauzere 的 08a、09a、11a、12a、14a、17a；Brandimarte 10 个和 Barnes 21 个实例均不匹配，因此继续使用原 24/3 标准修复和 32/8 relay 修复。该筛选只使用工件数、工序数和机器候选总数，不包含固定 seed、实例名称或参考 makespan。
 
 `gRepairFailures` 统计所有联合修复尝试的连续无严格改善次数，包括标准和扩展模式；任一修复严格降低 makespan 或阶段重启时清零。它不只统计标准修复失败，也不根据实例名称切换邻域。
 
@@ -507,12 +518,16 @@ Tabu 仅为最终选中候选构造完整图
 
 | 环境变量 | C++ 默认路径 | 当前批量配置 |
 | --- | --- | --- |
+| `HLS_ENABLE_GREEDY` / `HLS_ENABLE_GENETIC` / `HLS_ENABLE_TABU` | 均开启 | 均为 1；仅消融实验设为 0 |
 | `HLS_ENABLE_GUIDED_SEARCH` | 按总工序数至少 80 自动启用 | `force`，所有实例允许调用 |
+| `HLS_ADAPTIVE_METHOD_SELECTION` | 开启 | 1；消融实验设为 0 时按固定初始权重随机选择启用方法 |
 | `HLS_GUIDED_TOP_K` | 48 | 96 |
 | `HLS_DISPATCH_INITIAL` | 关闭 | 1 |
 | `HLS_GREEDY_FLEXIBLE_REPAIR` | 关闭 | 1 |
 | `HLS_GREEDY_REPAIR_RELAYS` | 关闭 | 1 |
 | `HLS_GREEDY_RELEASE_COUNT` / `HLS_GREEDY_REPAIR_SECONDS` | 修复接口 24 / 3 | 扩展模式 32 / 8；标准模式固定 24 / 3 |
+| `HLS_GREEDY_ROUTE_REPAIR` | 关闭 | 1；匹配结构时使用路线片段 32 / 5 |
+| `HLS_ROUTE_AWARE_METHOD_SELECTION` | 关闭 | 1；仅在路线修复结构匹配时 Greedy +0.05、Guided -0.05 |
 | `HLS_GREEDY_COPT_REPAIR` | 关闭 | 0 |
 | `HLS_GA_WORKLOAD_REDISTRIBUTION` | 关闭 | 1 |
 | `HLS_GA_ACTIVE_DECODE` | 关闭 | 0 |
@@ -524,11 +539,17 @@ Tabu 仅为最终选中候选构造完整图
 
 四种方法额外的 `HLS_*_SCORE_BONUS` 在当前批量配置中均为 0，自适应控制器仍使用第 5 节的统一评分公式。
 
-`run_smartlab_hls.py` 通过 `run_adaptive_brandimarte.py::Runner` 启动任务：先清除父进程继承的全部 `HLS_*`，再按已保存参数构造统一环境，最后叠加脚本内固定的 `EXPERIMENT_ENV`。因此，仅在命令前设置任意 `HLS_*` 不会覆盖当前批量方案。可调的统一参数应使用脚本支持的 `SEARCH_MODE`、`MAX_ITER`、`GREEDY_RL_TOP_K`、`TABU_RL_EXPLORATION` 等名称；新增算法开关应修改配置生成处并留存清单。`run_optimized_hls.sh` 的候选实验入口另支持 `CANDIDATE_HLS_ENV`，与 SmartLab 入口不同。
+核心模块开关默认不会改变原 HLS。禁用某个方法时，控制器同时将其从初始强化、在线选择、完整无改进轮次、阶段重启门槛和最终统计中移除；至少需要保留 Greedy、GA、Tabu 中的一种。`run_core_ablation.sh` 使用独立构建目录和配对 seed 顺序运行各变体。当前正式消融范围仅为 Brandimarte Mk01～Mk10，各运行 10 次；Barnes 和 Dauzere 不混入本轮消融汇总。具体实验矩阵见 `ablation.md`。
+
+消融变体之间顺序执行；同一变体的 100 个 instance/run 任务复用 SmartLab 的资源调度器动态并行。默认并发上限 14、每任务 1 个逻辑 CPU、CPU 使用上限 95%、每任务预留 2 GiB、额外保留 4 GiB 内存。实际并发由 cgroup CPU/内存限制、外部 CPU 负载和运行任务 RSS 共同决定。
+
+消融入口将 `PROCESS_REPORT_INTERVAL` 默认设为 300 秒。达到间隔时，调度器在终端和 `scheduler.log` 输出所有活动任务的 PID、instance、run、seed、经过时间、CPU 时间、RSS 和绑定核，并追加到变体运行目录的 `processes_10min.csv`；文件名因兼容历史批次而保留。
+
+`run_smartlab_hls.py` 通过 `run_adaptive_brandimarte.py::Runner` 启动任务：先清除父进程继承的全部 `HLS_*`，再按已保存参数构造统一环境，最后叠加脚本内固定的 `EXPERIMENT_ENV`。因此，仅在命令前设置任意 `HLS_*` 不会覆盖当前批量方案。可调的统一参数应使用脚本支持的 `SEARCH_MODE`、`MAX_ITER`、`GREEDY_RL_TOP_K`、`TABU_RL_EXPLORATION` 等名称。审计实验可用 `SMARTLAB_HLS_ENV` 提供 JSON 字典覆盖算法开关，实际结果会写入 `config.json`；正式重复实验应保留默认统一配置。`run_optimized_hls.sh` 的候选实验入口另支持 `CANDIDATE_HLS_ENV`。
 
 ### 9.4 数据集、程序与模型快照
 
-`run_smartlab_hls.sh` 调用 `run_smartlab_hls.py`，默认从 `datasets/SmartLab_Challenge_2020` 自动发现全部实例，按自然顺序排序：Brandimarte 10 个、Barnes 21 个、Dauzere 18 个，合计 49 个；默认每个 10 次，共 490 个任务。`--families brandimarte` 可只创建 100 个任务。
+`run_smartlab_hls.sh` 调用 `run_smartlab_hls.py`，默认从 `datasets/SmartLab_Challenge_2020` 自动发现全部实例，按自然顺序排序：Brandimarte 10 个、Barnes 21 个、Dauzere 18 个，合计 49 个；默认每个 10 次，共 490 个任务。`--families brandimarte` 可只创建 100 个任务；`--instances 08a 09a` 可在已选系列内进一步限定实例标签，未知标签会在创建任务前报错。
 
 程序优先选择 `build/optimized/production_scheduling`，缺失时回退 `build/production_scheduling`，也可用 `EXECUTABLE` 显式指定。二进制是否包含最新实现要以来源和 SHA-256 为准，不能仅凭环境开关判断。模型通过 `MODEL_PATH` 指定，默认是已训练的 Brandimarte Actor。创建批次时将二进制、模型、全部实例和 L2S 对比数据复制到 `inputs/`，并记录来源及校验值，之后各任务使用快照。
 
@@ -536,7 +557,7 @@ C++ 模型推理在 CPU 上执行，不要求激活 GPU 环境；Python 调度�
 
 ### 9.5 随机种子与恢复
 
-创建批次时使用 `secrets.randbits(32)` 为每个任务生成随机 seed，提前写入 `seeds.csv` 和 `state.json`，同批次出现重复则重抽，除此之外不根据 makespan 挑选 seed。算法根 seed 不按实例固定；不同实例共享相同参数，使用各自独立随机流。
+创建批次时使用 `secrets.randbits(32)` 为每个任务生成随机 seed，提前写入 `seeds.csv` 和 `state.json`，同批次出现重复则重抽，除此之外不根据 makespan 挑选 seed。算法根 seed 不按实例固定；不同实例共享相同参数，使用各自独立随机流。设置 `PAIRED_SEEDS_FILE` 时可读取包含 `family,instance,run,seed`（单系列可省略 `family`）的完整任务表；脚本要求任务集合完全一致、seed 均在 uint32 范围且互不重复，并将来源文件 SHA-256 写入 `config.json`。该功能只用于候选/基线配对，不改变默认随机生成方式。
 
 `--resume --log-dir <原目录>` 校验输入快照并恢复原清单，跳过已成功任务，用原 seed 重试未完成任务；旧尝试日志移入 `attempts/`。恢复不会给已创建的 600 秒任务改成 3600 秒，旧参数由 `config.json` 决定。改变时限或方案应新建批次，避免混合口径。`run_optimized_hls.sh` 的 `PAIRED_SEEDS_FILE` 可显式重放已有种子，用于配对对照，不是默认新实验的种子生成方式。
 
@@ -631,6 +652,29 @@ Mk06 63.20   Mk07 141.10  Mk08 523.00   Mk09 307.00  Mk10 208.80
 该批总体平均 **174.73**，对照同一份 L2S 的 **177.67**，也是 8 个更好、2 个持平。冻结版本提交为 `bbe1b82231f2794a7b851f01bd8df612c9f82b86`。3600 秒批次清单中的程序 SHA-256 为 `a59024ea64967dae667408054ecf62acbf7f39648393912eb94480baf7e8c974`，模型 SHA-256 为 `37d0aa8d6b12d512a67debb55071f6b88edcfbefa0eddabd06ca8fbfdb81f67e`，与冻结验证所用版本对应。
 
 600 秒与 3600 秒两批分别保留原始记录，不能拼接各自最好 run 组成新的一组十次结果。表格比较的是现有实验的解质量；L2S 的 400 次迭代与 HLS 的秒数预算不是相同口径，资源和完整墙钟时间也须另行对齐，不能据此宣称等算力优势，或把全部改善单独归因于 RL、联合修复等某一模块。
+
+### 10.3 路线联合修复配对验证
+
+路线联合修复使用候选创建时重新生成的随机 seed，并让旧二进制与候选二进制逐任务复用同一 seed；没有按结果筛选或按实例固定 seed。300 秒筛选结果如下：
+
+| 结构组 | 实例与重复数 | 旧版均值 | 路线修复均值 | 差值 |
+| --- | --- | ---: | ---: | ---: |
+| 15 工件长路线高柔性 | 08a/09a/11a/12a，各 5 次 | 2114.95 | 2109.05 | -5.90 |
+| 20 工件长路线中等柔性 | 14a/17a，各 5 次 | 2222.30 | 2217.00 | -5.30 |
+
+第一组 20 个配对任务为 12 胜、1 平、7 负；第二组分别为 14a `2233.4 -> 2232.0`、17a `2211.2 -> 2202.0`。同时以全新 seed 对 Brandimarte 的 Mk02/Mk05/Mk10 和 Barnes 的 mt10cc/setb4xyz/seti5xyz 做 180 秒配对回归，六个最终 makespan 逐项完全一致。该证据支持平均收益和结构隔离，但不是新的三个系列各实例 10 次 3600 秒最终验收；旧版完整均值与 L2S 的比较仍以第 10.1 节和根目录 CSV 为准。
+
+上述配对实验的任务表及逐次日志保存在 `codex_runs/20261021_dauzere_route_repair_screening/`。
+
+最终候选另在 Dauzere 全 18 个实例上各运行 3 次，每次 600 秒；54 个 seed 均由新批次独立随机生成，全部任务成功且日志确认 Greedy/Tabu RL 均已加载。18 个实例均值再等权平均为 `2297.5926`，对应 `l2s_dauzere.csv` 为 `2306.4944`，HLS 低 `8.9018`，约降低 `0.386%`。按实例均值计为 6 胜、0 平、12 负，因此该批证明的是**数据集总体平均**优于 L2S，不表示每个 Dauzere 实例都已超过 L2S。审计目录为 `codex_runs/20261021_dauzere_route_repair_final_600/`，快照二进制 SHA-256 为 `3fa7748cb1cb6b0a5d5df15b42174e370602d6e67e02a8b85e8cd5726ce52801`。
+
+结合现有完整 CSV，三个系列当前可引用的总体均值为：Brandimarte `174.21 < 177.67`，Barnes `1014.4286 < 1097.4429`，Dauzere 新 600 秒验证 `2297.5926 < 2306.4944`。三者的运行时限和样本批次并不相同，不能将这组数字解释为跨数据集的等预算排名；它用于确认最终 HLS 配置在每个系列上均保持低于各自 L2S 参考均值。
+
+后续方法选择消融复用上述最终批次中六个路线匹配实例的 18 个 seed。关闭路线、全路线、全路线加方法选择的六实例均值分别为 `2138.6111`、`2138.1111`、`2137.5000`；方法选择相对关闭路线为 11 胜、1 平、6 负。再使用 12 个全新随机 seed 做 300 秒独立配对，全路线基线为 `2142.4167`，方法选择候选为 `2136.3333`，平均改善 `6.0833`，逐次为 6 胜、3 平、3 负。审计目录为 `codex_runs/20261021_dauzere_continued_optimization/`。
+
+当前默认二进制包含路线修复和路线感知方法选择，SHA-256 为 `ef1d64ce3d0145970fb7bfdc5dbfef8cf7cb4cdf2636446d87fe31f0ef501fbf`。
+
+方法选择只影响六个结构匹配实例；将其 600 秒结果替换进同 seed 的 18 实例批次，其余 12 个实例沿用完全相同的执行路径，组合总体均值约为 `2297.3889`，仍低于 L2S 的 `2306.4944`。该组合用于选择算法版本，不替代一次独立启动的完整 54 任务验收记录。
 
 ## 11. 当前实现的边界
 

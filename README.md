@@ -177,6 +177,28 @@ cd /home/luopw24/HLS && ./run_smartlab_hls.sh --families barnes dauzere
 cd /home/luopw24/HLS && LOG_DIR=/home/luopw24/HLS/run_logs/smartlab_<运行时间> RESUME=1 ./run_smartlab_hls.sh
 ```
 
+### 核心模块消融实验
+
+消融入口会构建独立的 `build/ablation/production_scheduling`，完整 HLS 和各变体共享同一份随机 seed，变体之间顺序运行。当前正式消融只使用 Brandimarte，默认 10 个 instance 各运行 10 次：
+
+```bash
+cd /home/luopw24/HLS && ./run_core_ablation.sh
+```
+
+默认 11 个核心变体，共创建 1100 个独立任务；Barnes 和 Dauzere 不纳入本轮消融汇总。
+
+同一变体内默认最多动态并发 14 个任务。调度器根据 CPU 配额、实时 CPU 使用率、可用内存和任务 RSS 决定实际并发；不同变体顺序执行，避免互相争抢资源影响配对比较。并发和资源预留可通过 `--max-parallel`、`--cpu-usage-limit`、`--reserve-cpus`、`--job-memory-gb` 和 `--reserve-memory-gb` 调整。
+
+运行期间默认每 300 秒输出一次活动进程的 PID、instance、run、seed、运行时长、CPU 时间、RSS 和绑定核，并写入各变体的 `run/processes_10min.csv`。使用 `--process-report-interval 120` 可改为每 120 秒输出一次。
+
+小规模验证命令：
+
+```bash
+cd /home/luopw24/HLS && ./run_core_ablation.sh --families brandimarte --instances Mk01 Mk02 --runs 2 --total-time 60 --max-parallel 4
+```
+
+默认变体、模块开关、恢复命令和输出结构见 [ablation.md](ablation.md)。
+
 ### Greedy PPO 训练与测试
 
 小批量训练：

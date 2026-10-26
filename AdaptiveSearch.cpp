@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -38,9 +39,17 @@ AdaptiveSearchController::AdaptiveSearchController(
     const double search_mode_preference,
     const double genetic_preference,
     const unsigned int random_seed,
-    const bool guided_search_enabled
+    const bool guided_search_enabled,
+    const bool route_aware_selection,
+    std::array<bool, 4> enabled_methods,
+    const bool adaptive_selection_enabled
 ) : random_engine_(random_seed),
-    guided_search_enabled_(guided_search_enabled) {
+    guided_search_enabled_(
+        guided_search_enabled && enabled_methods[MethodIndex(SearchMethod::Guided)]
+    ),
+    enabled_methods_(std::move(enabled_methods)),
+    adaptive_selection_enabled_(adaptive_selection_enabled) {
+    enabled_methods_[MethodIndex(SearchMethod::Guided)] = guided_search_enabled_;
     const double search_preference = ClampProbability(search_mode_preference);
     const double genetic_share = ClampProbability(genetic_preference);
     initial_preferences_[MethodIndex(SearchMethod::Greedy)] =
@@ -49,12 +58,19 @@ AdaptiveSearchController::AdaptiveSearchController(
         std::max(0.05, search_preference * genetic_share);
     initial_preferences_[MethodIndex(SearchMethod::Tabu)] =
         std::max(0.05, search_preference * (1.0 - genetic_share));
+    for (int index = 0; index < 3; ++index) {
+        if (!enabled_methods_[index]) {
+            initial_preferences_[index] = 0.0;
+        }
+    }
     const double preference_sum =
         initial_preferences_[0] +
         initial_preferences_[1] +
         initial_preferences_[2];
-    for (int index = 0; index < 3; ++index) {
-        initial_preferences_[index] /= preference_sum;
+    if (preference_sum > 0.0) {
+        for (int index = 0; index < 3; ++index) {
+            initial_preferences_[index] /= preference_sum;
+        }
     }
     initial_preferences_[MethodIndex(SearchMethod::Guided)] =
         guided_search_enabled_ ? 0.10 : 0.0;
@@ -66,9 +82,17 @@ AdaptiveSearchController::AdaptiveSearchController(
         EnvironmentBonus("HLS_TABU_SCORE_BONUS");
     score_bonuses_[MethodIndex(SearchMethod::Guided)] =
         EnvironmentBonus("HLS_GUIDED_SCORE_BONUS");
+    if (route_aware_selection) {
+        score_bonuses_[MethodIndex(SearchMethod::Greedy)] += 0.05;
+        score_bonuses_[MethodIndex(SearchMethod::Guided)] -= 0.05;
+    }
 
-    pending_intensification_.push_back({SearchMethod::Greedy, true, false});
-    pending_intensification_.push_back({SearchMethod::Tabu, true, false});
+    if (enabled_methods_[MethodIndex(SearchMethod::Greedy)]) {
+        pending_intensification_.push_back({SearchMethod::Greedy, true, false});
+    }
+    if (enabled_methods_[MethodIndex(SearchMethod::Tabu)]) {
+        pending_intensification_.push_back({SearchMethod::Tabu, true, false});
+    }
 }
 
 SearchDecision AdaptiveSearchController::Select(
@@ -81,7 +105,7 @@ SearchDecision AdaptiveSearchController::Select(
         return decision;
     }
 
-    std::array<bool, kMethodCount> eligible_methods{true, true, true, true};
+    std::array<bool, kMethodCount> eligible_methods = enabled_methods_;
     eligible_methods[MethodIndex(SearchMethod::Guided)] =
         guided_search_enabled_ && stagnation_count >= kMildStagnation;
     const SearchMethodStats &guided_stats =
@@ -91,6 +115,15 @@ SearchDecision AdaptiveSearchController::Select(
         guided_stats.global_improvements == 0) {
         eligible_methods[MethodIndex(SearchMethod::Guided)] =
             stagnation_count >= kDeepStagnation && total_calls_ % 32 == 0;
+    }
+    if (!adaptive_selection_enabled_) {
+        const SearchMethod method = SelectExplorationMethod(eligible_methods);
+        return {
+            method,
+            false,
+            method == SearchMethod::Genetic &&
+                stagnation_count >= kDeepStagnation
+        };
     }
     bool has_method_without_long_failure = false;
     for (int index = 0; index < kMethodCount; ++index) {
@@ -228,8 +261,12 @@ void AdaptiveSearchController::ScheduleIntensification() {
     if (!pending_intensification_.empty()) {
         return;
     }
-    pending_intensification_.push_back({SearchMethod::Greedy, true, false});
-    pending_intensification_.push_back({SearchMethod::Tabu, true, false});
+    if (enabled_methods_[MethodIndex(SearchMethod::Greedy)]) {
+        pending_intensification_.push_back({SearchMethod::Greedy, true, false});
+    }
+    if (enabled_methods_[MethodIndex(SearchMethod::Tabu)]) {
+        pending_intensification_.push_back({SearchMethod::Tabu, true, false});
+    }
 }
 
 int AdaptiveSearchController::SelectArchiveIndex(const int archive_size) {

@@ -5,6 +5,12 @@
 /CMakeCache.txt
 /Makefile
 /cmake_install.cmake
+/compile_commands.json
+/build.ninja
+/.ninja_deps
+/.ninja_log
+/CTestTestfile.cmake
+/Testing/
 *.o
 *.obj
 *.a
@@ -27,6 +33,7 @@
 !/rl_greedy/models/.gitkeep
 /rl_greedy/results/
 /codex_runs/
+/ablation_runs/
 
 # External benchmark mirrors not required by the default Mk01-Mk10 workflow
 /datasets/Kacem_Data/

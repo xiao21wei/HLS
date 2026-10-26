@@ -310,6 +310,8 @@ def solver_environment(parameters, model_path):
         "HLS_TABU_SCORE_BONUS": "0", "HLS_GUIDED_SCORE_BONUS": "0",
         "HLS_GA_ACTIVE_DECODE": "0", "HLS_GA_LOCAL_RESTART": "0",
         "HLS_ENABLE_RESTARTS": "0", "HLS_GREEDY_COPT_REPAIR": "0",
+        "HLS_GREEDY_ROUTE_REPAIR": "0",
+        "HLS_ROUTE_AWARE_METHOD_SELECTION": "0",
     }
     for method in ("GREEDY", "TABU"):
         prefix = "HLS_%s_RL" % method
@@ -526,13 +528,30 @@ class Runner:
             path = self.directory / (task["label"] + ".txt")
             text = read_text(path)
             finals = FINAL.findall(text)
-            rl_ok = "greedy_rl_enabled: true" in text and "tabu_rl_enabled: true" in text
+            experiment_environment = self.config.get("experimental_environment", {})
+            expected_greedy_rl = experiment_environment.get("HLS_GREEDY_RL", "1") != "0"
+            expected_tabu_rl = experiment_environment.get("HLS_TABU_RL", "1") != "0"
+            greedy_rl_ok = (
+                ("greedy_rl_enabled: true" in text) if expected_greedy_rl
+                else ("greedy_rl_enabled: false" in text)
+            )
+            tabu_rl_ok = (
+                ("tabu_rl_enabled: true" in text) if expected_tabu_rl
+                else ("tabu_rl_enabled: false" in text)
+            )
+            rl_ok = greedy_rl_ok and tabu_rl_ok
             status = item["ending"][1] if item["ending"] else "OK" if code == 0 and finals and rl_ok else "FAILED"
             task.update({"status": status, "exit_code": code, "wall_seconds": round(elapsed, 3), "finished_at": now()})
             if status == "OK":
                 task["makespan"] = int(finals[-1])
             elif not item["ending"]:
-                task["error"] = "exit=%s, final_makespan=%s, both_RL_enabled=%s" % (code, bool(finals), rl_ok)
+                task["error"] = (
+                    "exit=%s, final_makespan=%s, expected_greedy_rl=%s, "
+                    "greedy_rl_ok=%s, expected_tabu_rl=%s, tabu_rl_ok=%s" % (
+                        code, bool(finals), expected_greedy_rl, greedy_rl_ok,
+                        expected_tabu_rl, tabu_rl_ok
+                    )
+                )
             task["initial_source"] = "COPT" if "COPT initial makespan:" in text else "HLS_FALLBACK" if "HLS fallback initial makespan:" in text else "UNKNOWN"
             with path.open("a", encoding="utf-8") as handle:
                 handle.write("\nwall_seconds=%s\nexit_code=%s\nbatch_status=%s\n" % (task["wall_seconds"], code, status))
@@ -560,7 +579,16 @@ class Runner:
         self.state["phase"] = "RUNNING"
         self.message("Run directory: %s" % self.directory)
         self.message("Uniform solver parameters: %s" % json.dumps(self.config["parameters"], sort_keys=True))
-        self.message("Greedy RL=ON; Tabu RL=ON; %d tasks; random seeds retained in seeds.csv" % len(self.state["tasks"]))
+        experiment_environment = self.config.get("experimental_environment", {})
+        greedy_rl = experiment_environment.get("HLS_GREEDY_RL", "1") != "0"
+        tabu_rl = experiment_environment.get("HLS_TABU_RL", "1") != "0"
+        self.message(
+            "Greedy RL=%s; Tabu RL=%s; %d tasks; random seeds retained in seeds.csv" % (
+                "ON" if greedy_rl else "OFF",
+                "ON" if tabu_rl else "OFF",
+                len(self.state["tasks"])
+            )
+        )
         self.message("Executable SHA256: %s" % self.config["artifacts"]["executable"]["sha256"])
         self.resources.sample(set())
         next_check = time.monotonic() + min(1, self.settings.check_interval)

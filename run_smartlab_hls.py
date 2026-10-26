@@ -25,6 +25,11 @@ PATTERNS = {
     "dauzere": re.compile(r"^fjsp\.dauzere\.([^.]+)\..+\.txt$"),
 }
 EXPERIMENT_ENV = {
+    "HLS_ENABLE_GREEDY": "1",
+    "HLS_ENABLE_GENETIC": "1",
+    "HLS_ENABLE_TABU": "1",
+    "HLS_ENABLE_GUIDED_SEARCH": "force",
+    "HLS_ADAPTIVE_METHOD_SELECTION": "1",
     "HLS_GA_ACTIVE_DECODE": "0",
     "HLS_GA_LOCAL_RESTART": "0",
     "HLS_GREEDY_COPT_REPAIR": "0",
@@ -32,6 +37,8 @@ EXPERIMENT_ENV = {
     "HLS_GREEDY_REPAIR_RELAYS": "1",
     "HLS_GREEDY_RELEASE_COUNT": "32",
     "HLS_GREEDY_REPAIR_SECONDS": "8",
+    "HLS_GREEDY_ROUTE_REPAIR": "1",
+    "HLS_ROUTE_AWARE_METHOD_SELECTION": "1",
     "HLS_TABU_CONTINUOUS_TRAJECTORY": "1",
     "HLS_ENABLE_RESTARTS": "1",
     "HLS_RESTART_STAGNATION_CALLS": "16",
@@ -95,6 +102,7 @@ def parse_env_parameters():
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--families", nargs="+", default=list(FAMILIES), choices=FAMILIES)
+    parser.add_argument("--instances", nargs="+", help="Optional instance labels within the selected families")
     parser.add_argument("--runs", type=int, default=int(os.environ.get("RUNS", "10")))
     parser.add_argument("--log-dir", default=os.environ.get("LOG_DIR"))
     parser.add_argument("--resume", action="store_true", default=os.environ.get("RESUME", "0") == "1")
@@ -108,12 +116,17 @@ def parse_args():
     parser.add_argument("--check-interval", type=float, default=float(os.environ.get("CHECK_INTERVAL", "5")))
     parser.add_argument("--ramp-up", type=int, default=int(os.environ.get("RAMP_UP", "2")))
     parser.add_argument("--timeout-grace", type=float, default=float(os.environ.get("TIMEOUT_GRACE", "120")))
+    parser.add_argument(
+        "--process-report-interval", type=float,
+        default=float(os.environ.get("PROCESS_REPORT_INTERVAL", "600"))
+    )
     args = parser.parse_args()
     if args.runs < 1 or args.max_parallel < 0 or args.cpus_per_job < 1:
         parser.error("runs, cpus-per-job and max-parallel must be valid positive values")
     if not 0.1 <= args.cpu_usage_limit <= 1 or args.job_memory_gb <= 0 or args.reserve_memory_gb < 0:
         parser.error("invalid CPU or memory settings")
-    if args.check_interval < 0.1 or args.ramp_up < 1 or args.timeout_grace < 1:
+    if (args.check_interval < 0.1 or args.ramp_up < 1 or
+            args.timeout_grace < 1 or args.process_report_interval < 1):
         parser.error("invalid scheduler timing settings")
     if len(set(args.families)) != len(args.families):
         parser.error("duplicate family")
@@ -183,17 +196,63 @@ def create_manifest(directory, settings, discovered, parameters):
                               "seed": seed, "label": "%s_run%02d" % (safe, run),
                               "status": "PENDING", "attempt": 0})
         families[family] = labels
+    seed_source = "generated with secrets.randbits(32)"
+    paired_seeds_file = os.environ.get("PAIRED_SEEDS_FILE")
+    if paired_seeds_file:
+        paired_path = Path(paired_seeds_file).resolve()
+        with paired_path.open(newline="", encoding="utf-8-sig") as handle:
+            reader = csv.DictReader(handle)
+            required = {"instance", "run", "seed"}
+            if reader.fieldnames is None or not required.issubset(reader.fieldnames):
+                raise ValueError("PAIRED_SEEDS_FILE must contain instance, run and seed columns")
+            paired = {}
+            for row in reader:
+                family = row.get("family", "")
+                if not family and len(settings.families) == 1:
+                    family = settings.families[0]
+                key = (family, row["instance"], int(row["run"]))
+                if key in paired:
+                    raise ValueError("Duplicate paired seed: %s" % (key,))
+                seed = int(row["seed"])
+                if not 0 <= seed <= 4294967295:
+                    raise ValueError("Paired seed outside uint32 range: %s" % seed)
+                paired[key] = seed
+        expected = {(task["family"], task["label_name"], task["run"]) for task in tasks}
+        if set(paired) != expected:
+            missing = sorted(expected - set(paired))[:5]
+            extra = sorted(set(paired) - expected)[:5]
+            raise ValueError("Paired seed task mismatch; missing=%s extra=%s" % (missing, extra))
+        if len(set(paired.values())) != len(paired):
+            raise ValueError("PAIRED_SEEDS_FILE contains duplicate seed values")
+        for task in tasks:
+            task["seed"] = paired[(task["family"], task["label_name"], task["run"])]
+        seed_source = "paired seeds from %s (sha256=%s)" % (
+            paired_path,
+            batch.sha256(paired_path),
+        )
     reference_path = inputs / "l2s_reference.csv"
     batch.write_csv(reference_path, [["instance"] + ["run%d" % n for n in range(1, 11)]] + references)
     artifacts["l2s"] = {"source": "generated from l2s_barnes.csv/l2s_dauzere.csv/l2s_brandimarte.csv",
                          "snapshot": str(reference_path.relative_to(directory)), "sha256": batch.sha256(reference_path)}
     output_root = Path(os.environ.get("OUTPUT_DIR", str(batch.ROOT))).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
+    experiment_environment = dict(EXPERIMENT_ENV)
+    experiment_override = os.environ.get("SMARTLAB_HLS_ENV")
+    if experiment_override:
+        extras = json.loads(experiment_override)
+        if not isinstance(extras, dict) or any(
+            not key.startswith("HLS_") or not isinstance(value, str)
+            for key, value in extras.items()
+        ):
+            raise ValueError("SMARTLAB_HLS_ENV must map HLS_* names to string values")
+        experiment_environment.update(extras)
     config = {"schema": 1, "created_at": batch.now(), "families": families,
               "instances": instances, "runs": settings.runs, "parameters": parameters,
+              "seed_source": seed_source,
               "artifacts": artifacts, "experimental_environment": dict(EXPERIMENT_ENV),
               "output_files": {family: str(output_root / ("HLS_%s.csv" % family)) for family in settings.families},
               "scheduler_at_creation": vars(settings)}
+    config["experimental_environment"] = experiment_environment
     state = {"tasks": tasks, "peak_rss": 0, "phase": "READY"}
     batch.write_csv(directory / "seeds.csv", [["family", "instance", "run", "seed"]] + [
         [task["family"], task["label_name"], task["run"], task["seed"]] for task in tasks])
@@ -215,7 +274,9 @@ def write_family_outputs(directory, config, state):
 class SmartLabRunner(batch.Runner):
     def __init__(self, directory, settings, config, state, resources):
         super().__init__(directory, settings, config, state, resources)
-        self.next_process_report = time.monotonic() + 600.0
+        self.next_process_report = (
+            time.monotonic() + self.settings.process_report_interval
+        )
         self.process_report_path = directory / "processes_10min.csv"
         if not self.process_report_path.exists() or self.process_report_path.stat().st_size == 0:
             with self.process_report_path.open("w", newline="", encoding="utf-8") as handle:
@@ -252,14 +313,18 @@ class SmartLabRunner(batch.Runner):
                 row[1], row[2], row[3], row[4], float(row[6]), float(row[7]), float(row[8]), row[9]
             ) for row in rows if row[10] != "NO_ACTIVE_PROCESS"
         ]
-        self.message("10-minute process report: %s" % ("; ".join(descriptions) if descriptions else "no active solver"))
+        self.message("process report: %s" % (
+            "; ".join(descriptions) if descriptions else "no active solver"
+        ))
 
     def report(self, snapshot, job_memory, reserve):
         super().report(snapshot, job_memory, reserve)
         write_family_outputs(self.directory, self.config, self.state)
         if time.monotonic() >= self.next_process_report:
             self.process_report()
-            self.next_process_report = time.monotonic() + 600.0
+            self.next_process_report = (
+                time.monotonic() + self.settings.process_report_interval
+            )
 
 
 def install_output_hook():
@@ -283,6 +348,24 @@ def main():
     settings = parse_args()
     selected = tuple(settings.families)
     discovered = discover_instances(selected)
+    if settings.instances:
+        requested = set(settings.instances)
+        available = {
+            label
+            for family in selected
+            for label, _ in discovered[family]
+        }
+        missing = sorted(requested - available, key=natural_key)
+        if missing:
+            raise ValueError("Unknown selected instances: %s" % ", ".join(missing))
+        discovered = {
+            family: [
+                (label, path)
+                for label, path in entries
+                if label in requested
+            ]
+            for family, entries in discovered.items()
+        }
     total_instances = sum(len(values) for values in discovered.values())
     parameters = parse_env_parameters()
     resources = batch.Resources()
